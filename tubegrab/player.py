@@ -27,6 +27,7 @@ def tocar_stream(url_stream: str) -> str:
             break
         time.sleep(1)
 
-youtube_url = input("Coloque seu link aqui: ")
-stream_url = obter_url_audio(youtube_url)
-tocar_stream(stream_url)
+# Caso queira testar o código, descomente as linhas abaixo e coloque um link de vídeo do YouTube
+# youtube_url = input("Coloque seu link aqui: ")
+# stream_url = obter_url_audio(youtube_url)
+# tocar_stream(stream_url)
