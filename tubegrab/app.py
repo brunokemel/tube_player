@@ -476,17 +476,20 @@ class TubeGrab(ctk.CTk):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 stream_url = info['url']
+                # Se já existe um player, parar antes de criar outro
+            if hasattr(self, "player") and self.player is not None:
+                self.player.stop()
 
             self.log("Iniciando player de áudio...")
             self.set_status("Tocando áudio em streaming...", OK)
 
-            # Player VLC
-            player = vlc.MediaPlayer(stream_url)
-            player.play()
+             # Criar e guardar player
+            self.player = vlc.MediaPlayer(stream_url)
+            self.player.play()
 
             def monitor():
                 while True:
-                    state = player.get_state()
+                    state = self.player.get_state()
                     if state in (vlc.State.Ended, vlc.State.Error):
                         break
                     time.sleep(1)
