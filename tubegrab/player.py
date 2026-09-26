@@ -1,5 +1,7 @@
 import yt_dlp
 import vlc
+import time
+import os
 # funcao para obter a URL do stream de áudio do vídeo do YouTube
 def obter_url_audio(youtube_url: str) -> str:
     ydl_opts = {
@@ -11,11 +13,19 @@ def obter_url_audio(youtube_url: str) -> str:
         return info_dict.get('url')
 
 def tocar_stream(url_stream: str) -> str:
-    player = vlc.MediaPlayer(url_stream)
+    #caminho pasta VLC
+    vlc_path = os.path.join(os.getcwd(), "vlc", "plugins")
+    instance = vlc.Instance("--plugin-path=" + vlc_path)
+    player = instance.media_player_new()
+    media = instance.media_new(url_stream)
+    player.set_media(media)
     player.play()
     print("Tocando")
     while True:
-        pass
+        state = player.get_state()
+        if state in (vlc.State.Ended, vlc.State.Error):
+            break
+        time.sleep(1)
 
 youtube_url = input("Coloque seu link aqui: ")
 stream_url = obter_url_audio(youtube_url)
