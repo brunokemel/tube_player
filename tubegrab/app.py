@@ -294,6 +294,16 @@ class TubeGrab(ctk.CTk):
         )
         self.play_btn.pack(fill="x", pady=(0, 10))
 
+        # --- Controles do player ---
+        controls = ctk.CTkFrame(root, fg_color="transparent")
+        controls.pack(fill="x", pady=(10, 0))
+
+        ctk.CTkButton(controls, text="⏮ Voltar", command=lambda: self.skip_backward(10)).pack(side="left", padx=5)
+        ctk.CTkButton(controls, text="⏯ Pause", command=self.pause_player).pack(side="left", padx=5)
+        ctk.CTkButton(controls, text="▶ Play", command=self.resume_player).pack(side="left", padx=5)
+        ctk.CTkButton(controls, text="⏹ Stop", command=self.stop_player).pack(side="left", padx=5)
+        ctk.CTkButton(controls, text="⏭ Avançar", command=lambda: self.skip_forward(10)).pack(side="left", padx=5)
+
 
     def _on_mode(self, value: str):
         """Ativa ou desativa a qualidade ao mudar entre vídeo e áudio."""
@@ -499,6 +509,30 @@ class TubeGrab(ctk.CTk):
         except Exception as exc:
             self.log(f"Erro ao tocar áudio: {exc}")
             self.set_status("Falha ao iniciar player.", ACCENT)
+
+
+    # --- Controles extras ---
+    def pause_player(self):
+        if hasattr(self, "player") and self.player is not None:
+            self.player.pause()
+
+    def stop_player(self):
+        if hasattr(self, "player") and self.player is not None:
+            self.player.stop()
+
+    def resume_player(self):
+        if hasattr(self, "player") and self.player is not None:
+            self.player.play()
+
+    def skip_forward(self, seconds=10):
+        if hasattr(self, "player") and self.player is not None:
+            pos = self.player.get_time()
+            self.player.set_time(pos + seconds * 1000)
+
+    def skip_backward(self, seconds=10):
+        if hasattr(self, "player") and self.player is not None:
+            pos = self.player.get_time()
+            self.player.set_time(max(0, pos - seconds * 1000))
 
     def start_player(self):
         """Valida inputs e inicia o player de áudio."""
