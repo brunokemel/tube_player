@@ -8,6 +8,11 @@ import os
 import threading
 from pathlib import Path
 
+import vlc
+import yt_dlp
+import threading
+import time
+
 import customtkinter as ctk
 from tkinter import messagebox
 
@@ -277,6 +282,19 @@ class TubeGrab(ctk.CTk):
         )
         self.download_btn.pack(fill="x")
 
+        self.play_btn = ctk.CTkButton(
+            root,
+            text="Tocar",
+            height=48,
+            corner_radius=12,
+            fg_color="#2a3142",
+            hover_color="#343c52",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            command=self.start_player,
+        )
+        self.play_btn.pack(fill="x", pady=(0, 10))
+
+
     def _on_mode(self, value: str):
         """Ativa ou desativa a qualidade ao mudar entre vídeo e áudio."""
         if value == "Audio MP3":
@@ -450,6 +468,48 @@ class TubeGrab(ctk.CTk):
             self.after(0, lambda: messagebox.showerror("Erro", f"Falha no download:\n{exc}"))
         finally:
             self.set_busy(False)
+
+    def _play_audio(self, url: str):
+        """Obtém o stream de áudio e toca com VLC."""
+        try:
+            ydl_opts = {'format': 'bestaudio/best', 'quiet': True}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                stream_url = info['url']
+
+            self.log("Iniciando player de áudio...")
+            self.set_status("Tocando áudio em streaming...", OK)
+
+            # Player VLC
+            player = vlc.MediaPlayer(stream_url)
+            player.play()
+
+            def monitor():
+                while True:
+                    state = player.get_state()
+                    if state in (vlc.State.Ended, vlc.State.Error):
+                        break
+                    time.sleep(1)
+
+            threading.Thread(target=monitor, daemon=True).start()
+
+        except Exception as exc:
+            self.log(f"Erro ao tocar áudio: {exc}")
+            self.set_status("Falha ao iniciar player.", ACCENT)
+
+    def start_player(self):
+        """Valida inputs e inicia o player de áudio."""
+        if self.busy:
+            return
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showwarning("Link vazio", "Cole o link do YouTube.")
+            return
+        if not is_youtube_url(url):
+            messagebox.showwarning("Link inválido", "Isso não parece um link do YouTube.")
+            return
+
+        threading.Thread(target=self._play_audio, args=(url,), daemon=True).start()
 
 
 def main():
