@@ -1,8 +1,8 @@
 # TubeGrab
 
-Downloader de YouTube com interface grafica em Python.
+Downloader e player de YouTube com interface grafica em Python.
 
-Cole o link, escolha video ou audio e baixe na pasta que quiser.
+Cole o link de um video ou de uma playlist para reproduzir em sequencia ou baixar.
 
 ---
 
@@ -15,7 +15,8 @@ A ideia e um app desktop simples, visual e direto:
 3. Usuario escolhe Video (MP4) ou Audio (MP3).
 4. Se for video, escolhe a qualidade (1080p, 720p etc.).
 5. Escolhe a pasta de destino.
-6. Clica em Baixar e acompanha o progresso.
+6. Clica em Tocar para ouvir ou em Baixar e acompanha o progresso.
+7. Em uma playlist, o player avanca automaticamente para a proxima faixa.
 
 ### Por que essa stack
 
@@ -25,30 +26,48 @@ A ideia e um app desktop simples, visual e direto:
 | CustomTkinter | Interface grafica moderna em cima do Tkinter, sem Electron |
 | yt-dlp | Extrai e baixa video/audio do YouTube (sucessor do youtube-dl) |
 | FFmpeg | Junta video+audio e converte o audio para MP3 |
+| VLC / python-vlc | Reproduz os streams de audio sem baixa-los antes |
 | threading | Download em segundo plano para a janela nao travar |
 
 ### Como o codigo esta organizado
 
-Tudo fica em um unico arquivo: `youtube_downloader.py`.
+O ponto de entrada continua pequeno em `youtube_downloader.py`; a implementacao fica
+dividida no pacote `tubegrab`:
 
-- Constantes de cor e titulo no topo (tema escuro, vermelho YouTube).
-- Funcoes auxiliares: detectar pasta Downloads, validar URL, formatar duracao e views.
-- Classe `TubeGrab`: monta a janela, trata cliques e dispara as threads.
-- `fetch_info()` usa `yt_dlp` so para ler metadados (`skip_download=True`).
+- `app.py`: interface, fila de reproducao e tarefas em segundo plano.
+- `downloader.py`: metadados, URLs temporarias de stream e downloads.
+- `utils.py`: validacao de URL, pasta Downloads e formatacao de textos.
+- `config.py`: cores, titulo e tamanho inicial da janela.
+- `fetch_info()` usa `yt-dlp` apenas para ler metadados. Em playlists, a extracao e
+  rasa para nao abrir todos os videos durante a busca.
 - `start_download()` baixa de verdade:
   - Video: melhor video + melhor audio, merge em MP4, com teto de resolucao.
   - Audio: melhor faixa de audio, convertida para MP3 192 kbps via FFmpeg.
+- O player resolve somente o stream da faixa atual. A proxima URL e buscada quando
+  necessario, reduzindo memoria usada e evitando URLs expiradas.
 - `_progress_hook()` atualiza barra, porcentagem, velocidade e ETA.
 - A GUI so e alterada com `self.after(...)`, porque Tkinter nao e thread-safe.
 
 ### Decisoes de design
 
-- Um arquivo so: facil de zipar, enviar e rodar.
-- Sem banco, sem login, sem API key.
-- Playlist: se o link for de playlist, usa o primeiro video.
+- Dependencias enxutas e sem banco, login ou API key.
+- Playlist: cria uma fila leve, toca em sequencia e pula itens indisponiveis.
+- Downloads de playlist ficam em uma subpasta e recebem numeracao na ordem original.
 - Pasta padrao: Downloads do usuario.
 - Validacao de URL antes de chamar a rede.
 - Botoes desabilitados enquanto busca ou baixa, para evitar clique duplo.
+
+A logica de YouTube esta separada da interface. Isso facilita reaproveitar as regras
+de fila em uma futura versao Android, embora a interface CustomTkinter e o VLC para
+desktop precisem ser substituidos por componentes proprios do Android.
+
+### Interface
+
+- Layout moderno em duas colunas: conteudo e exportacao de um lado, player e
+  atividade do outro.
+- Cards arredondados, contraste suave e acoes principais em destaque.
+- Interface rolavel para manter os controles acessiveis em telas com pouca altura.
+- Nenhum pacote visual pesado ou arquivo de imagem adicional e carregado.
 
 Use apenas com conteudo que voce tem direito de baixar.
 
@@ -60,6 +79,8 @@ Use apenas com conteudo que voce tem direito de baixar.
 
 - Python 3.10 ou superior
 - FFmpeg no PATH (obrigatorio para MP3 e para juntar video+audio)
+- VLC Media Player instalado (obrigatorio para o player; use a mesma arquitetura
+  32/64 bits do Python)
 
 ### 2. Instalar FFmpeg
 
@@ -129,7 +150,7 @@ A janela TubeGrab deve abrir.
 ### 5. Como usar
 
 1. Cole o link do YouTube no campo **Link do video**.
-   Aceita `youtube.com/watch`, `youtu.be`, Shorts e YouTube Music.
+   Aceita video, playlist, `youtu.be`, Shorts e YouTube Music.
 2. Clique em **Buscar** (ou pressione Enter).
 3. Confira titulo, canal, duracao e views.
 4. Em **O que baixar**, escolha:
@@ -137,9 +158,11 @@ A janela TubeGrab deve abrir.
    - **Audio MP3** — so o som, em MP3
 5. Se escolheu Video, defina a **Qualidade**: Melhor, 1080p, 720p, 480p ou 360p.
 6. Em **Pasta de destino**, deixe Downloads ou clique em **Escolher**.
-7. Clique em **Baixar**.
-8. Acompanhe a barra, a porcentagem, a velocidade e o log.
-9. Ao terminar, aparece um aviso com a pasta do arquivo.
+7. Para ouvir sem baixar, clique em **Tocar**. Em playlists, use **Anterior** e
+   **Proxima**; a troca tambem acontece automaticamente ao fim da faixa.
+8. Para salvar, clique em **Baixar**.
+9. Acompanhe a barra, a porcentagem, a velocidade e o log.
+10. Ao terminar, aparece um aviso com a pasta do arquivo.
 
 ### 6. Atalhos e detalhes
 
@@ -147,6 +170,10 @@ A janela TubeGrab deve abrir.
 - Download nao trava a janela (roda em thread).
 - O nome do arquivo e o titulo do video.
 - Video sai em `.mp4`. Audio sai em `.mp3`.
+- Uma playlist baixada fica em `Downloads/Nome da playlist/` e seus arquivos sao
+  numerados.
+- Videos privados, removidos ou bloqueados sao ignorados pelo player, que tenta a
+  proxima faixa.
 
 ### 7. Problemas comuns
 
@@ -155,6 +182,7 @@ A janela TubeGrab deve abrir.
 | `No module named tkinter` | Windows: reinstale Python marcando tcl/tk. Linux: `sudo apt install python3-tk` |
 | `yt-dlp nao esta instalado` | `pip install -r requirements.txt` |
 | Erro de FFmpeg / nao gera MP3 | Instale o FFmpeg e confirme com `ffmpeg -version` |
+| Player nao inicia / erro de `libvlc` | Instale o VLC com a mesma arquitetura do Python |
 | Link invalido | Use um link completo do YouTube |
 | Download falhou | Video pode ser privado, restrito por idade ou bloqueado na sua rede |
 | Janela nao abre no servidor / SSH | Precisa de tela grafica (Windows, macOS ou Linux com desktop) |
@@ -163,7 +191,12 @@ A janela TubeGrab deve abrir.
 
 ```text
 TubeGrab/
-  youtube_downloader.py   App (interface + download)
+  youtube_downloader.py   Ponto de entrada
+  tubegrab/
+    app.py                Interface e player
+    downloader.py         YouTube, streams e downloads
+    utils.py              Funcoes auxiliares
+    config.py             Configuracao visual
   requirements.txt        Dependencias Python
   README.md               Este manual
 ```
@@ -174,6 +207,7 @@ TubeGrab/
 yt-dlp
 customtkinter
 pillow
+python-vlc
 ```
 
 ---

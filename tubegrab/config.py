@@ -5,14 +5,14 @@ app possam ser alterados sem precisar mexer na lógica de negócio.
 """
 
 APP_TITLE = "TubeGrab"
-WINDOW_SIZE = "780x640"
+WINDOW_SIZE = "1060x720"
 
 # Paleta de cores do tema escuro do app.
-BG = "#0f1117"
-CARD = "#171b24"
-ACCENT = "#ff3b30"
-ACCENT_HOVER = "#e6352b"
-TEXT = "#f4f6fb"
-MUTED = "#8b93a7"
-OK = "#2ecc71"
-WARN = "#f5a623"
+BG = "#090b10"
+CARD = "#12151d"
+ACCENT = "#ff4d5f"
+ACCENT_HOVER = "#e83f50"
+TEXT = "#f7f8fc"
+MUTED = "#8f96a8"
+OK = "#35d07f"
+WARN = "#f2b84b"

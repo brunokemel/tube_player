@@ -6,12 +6,10 @@ utilitários, deixando a aplicação mais fácil de ler e evoluir.
 
 import os
 import threading
+import time
 from pathlib import Path
 
 import vlc
-import yt_dlp
-import threading
-import time
 
 import customtkinter as ctk
 from tkinter import messagebox
@@ -28,7 +26,7 @@ from .config import (
     WARN,
     WINDOW_SIZE,
 )
-from .downloader import download_media, get_video_info
+from .downloader import download_media, get_audio_stream_url, get_playback_entries, get_video_info
 from .utils import downloads_dir, format_duration, format_views, is_youtube_url
 
 
@@ -37,7 +35,7 @@ class TubeGrab(ctk.CTk):
         super().__init__()
         self.title(APP_TITLE)
         self.geometry(WINDOW_SIZE)
-        self.minsize(720, 600)
+        self.minsize(820, 620)
         self.configure(fg_color=BG)
 
         # Estado da aplicação e controles da interface.
@@ -50,75 +48,119 @@ class TubeGrab(ctk.CTk):
         self.status_var = ctk.StringVar(value="Cole o link do YouTube para comecar")
         self.progress_value = 0.0
 
+        # A fila guarda somente dados pequenos. Cada stream é resolvido apenas
+        # quando chega sua vez, evitando consumo desnecessário em máquinas simples.
+        self.playlist = []
+        self.playlist_index = -1
+        self.playback_generation = 0
+        self.player = None
+
         self._build()
         self.after(80, self._center)
 
     def _center(self):
         """Centraliza a janela na tela ao abrir o app."""
         self.update_idletasks()
-        w, h = 780, 640
+        # Limita o tamanho inicial para caber tambem em telas menores.
+        w = min(1060, self.winfo_screenwidth() - 60)
+        h = min(720, self.winfo_screenheight() - 80)
         x = (self.winfo_screenwidth() - w) // 2
         y = (self.winfo_screenheight() - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _build(self):
-        """Montagem da interface principal da aplicação."""
-        root = ctk.CTkFrame(self, fg_color=BG)
-        root.pack(fill="both", expand=True, padx=28, pady=22)
+        """Monta a interface em duas colunas, com hierarquia visual mais leve."""
+        surface = "#0d1017"
+        field = "#191d27"
+        soft = "#242936"
 
-        # Cabeçalho com nome e descrição do app.
+        # O scroll mantem todo o conteudo acessivel em telas com pouca altura.
+        root = ctk.CTkScrollableFrame(
+            self,
+            fg_color=BG,
+            corner_radius=0,
+            scrollbar_button_color=soft,
+            scrollbar_button_hover_color="#303747",
+        )
+        root.pack(fill="both", expand=True)
+        root.grid_columnconfigure(0, weight=3, uniform="content")
+        root.grid_columnconfigure(1, weight=2, uniform="content")
+
+        # Cabecalho compacto com uma marca simples, sem carregar imagens externas.
         header = ctk.CTkFrame(root, fg_color="transparent")
-        header.pack(fill="x")
-
-        ctk.CTkLabel(
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=32, pady=(26, 22))
+        brand = ctk.CTkLabel(
             header,
+            text="TG",
+            width=46,
+            height=46,
+            corner_radius=15,
+            fg_color=ACCENT,
+            text_color="#ffffff",
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+        )
+        brand.pack(side="left")
+        heading = ctk.CTkFrame(header, fg_color="transparent")
+        heading.pack(side="left", padx=(14, 0))
+        ctk.CTkLabel(
+            heading,
             text="TubeGrab",
-            font=ctk.CTkFont(family="Segoe UI", size=30, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=27, weight="bold"),
             text_color=TEXT,
         ).pack(anchor="w")
         ctk.CTkLabel(
-            header,
-            text="Baixe videos e audios do YouTube em poucos cliques",
-            font=ctk.CTkFont(size=13),
-            text_color=MUTED,
-        ).pack(anchor="w", pady=(2, 18))
-
-        # Campo do link do vídeo.
-        url_card = ctk.CTkFrame(root, fg_color=CARD, corner_radius=16)
-        url_card.pack(fill="x", pady=(0, 14))
-        inner = ctk.CTkFrame(url_card, fg_color="transparent")
-        inner.pack(fill="x", padx=16, pady=16)
-
-        ctk.CTkLabel(
-            inner,
-            text="Link do video",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            heading,
+            text="Seu player e downloader, sem complicacao.",
+            font=ctk.CTkFont(size=12),
             text_color=MUTED,
         ).pack(anchor="w")
 
-        row = ctk.CTkFrame(inner, fg_color="transparent")
-        row.pack(fill="x", pady=(8, 0))
+        left = ctk.CTkFrame(root, fg_color="transparent")
+        left.grid(row=1, column=0, sticky="nsew", padx=(32, 10), pady=(0, 28))
+        right = ctk.CTkFrame(root, fg_color="transparent")
+        right.grid(row=1, column=1, sticky="nsew", padx=(10, 32), pady=(0, 28))
 
+        def card(parent):
+            """Cria a superficie padrao usada pelos blocos da interface."""
+            return ctk.CTkFrame(
+                parent,
+                fg_color=CARD,
+                corner_radius=22,
+                border_width=1,
+                border_color="#202530",
+            )
+
+        # Entrada principal: link e busca ficam em uma unica linha.
+        url_card = card(left)
+        url_card.pack(fill="x", pady=(0, 14))
+        ctk.CTkLabel(
+            url_card,
+            text="LINK DO YOUTUBE",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=MUTED,
+        ).pack(anchor="w", padx=20, pady=(18, 8))
+        url_row = ctk.CTkFrame(url_card, fg_color="transparent")
+        url_row.pack(fill="x", padx=20, pady=(0, 20))
         self.url_entry = ctk.CTkEntry(
-            row,
+            url_row,
             textvariable=self.url_var,
-            placeholder_text="https://www.youtube.com/watch?v=...",
-            height=42,
-            corner_radius=10,
-            border_width=0,
-            fg_color="#10131a",
+            placeholder_text="Cole um video ou playlist aqui",
+            height=48,
+            corner_radius=15,
+            border_width=1,
+            border_color="#282e3a",
+            fg_color=field,
             text_color=TEXT,
             font=ctk.CTkFont(size=13),
         )
         self.url_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.url_entry.bind("<Return>", lambda _e: self.fetch_info())
-
         self.fetch_btn = ctk.CTkButton(
-            row,
+            url_row,
             text="Buscar",
-            width=110,
-            height=42,
-            corner_radius=10,
+            width=104,
+            height=48,
+            corner_radius=15,
             fg_color=ACCENT,
             hover_color=ACCENT_HOVER,
             font=ctk.CTkFont(size=13, weight="bold"),
@@ -126,183 +168,207 @@ class TubeGrab(ctk.CTk):
         )
         self.fetch_btn.pack(side="left")
 
-        # Card com informações do vídeo encontrado.
-        self.info_card = ctk.CTkFrame(root, fg_color=CARD, corner_radius=16)
+        # Resumo do item encontrado.
+        self.info_card = card(left)
         self.info_card.pack(fill="x", pady=(0, 14))
-        info_inner = ctk.CTkFrame(self.info_card, fg_color="transparent")
-        info_inner.pack(fill="x", padx=16, pady=16)
-
+        ctk.CTkLabel(
+            self.info_card,
+            text="CONTEUDO SELECIONADO",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=MUTED,
+        ).pack(anchor="w", padx=20, pady=(18, 8))
         self.title_label = ctk.CTkLabel(
-            info_inner,
+            self.info_card,
             text="Nenhum video carregado",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            font=ctk.CTkFont(size=17, weight="bold"),
             text_color=TEXT,
-            wraplength=680,
+            wraplength=520,
             justify="left",
             anchor="w",
         )
-        self.title_label.pack(fill="x")
-
+        self.title_label.pack(fill="x", padx=20)
         self.meta_label = ctk.CTkLabel(
-            info_inner,
+            self.info_card,
             text="Canal  ·  duracao  ·  visualizacoes",
             font=ctk.CTkFont(size=12),
             text_color=MUTED,
             anchor="w",
         )
-        self.meta_label.pack(fill="x", pady=(4, 0))
+        self.meta_label.pack(fill="x", padx=20, pady=(5, 20))
 
-        # Configurações do tipo de arquivo e qualidade.
-        options = ctk.CTkFrame(root, fg_color=CARD, corner_radius=16)
-        options.pack(fill="x", pady=(0, 14))
-        opt_inner = ctk.CTkFrame(options, fg_color="transparent")
-        opt_inner.pack(fill="x", padx=16, pady=16)
-
+        # Opcoes de exportacao agrupadas sem divisorias pesadas.
+        options = card(left)
+        options.pack(fill="x")
         ctk.CTkLabel(
-            opt_inner,
-            text="O que baixar",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            options,
+            text="FORMATO E DESTINO",
+            font=ctk.CTkFont(size=11, weight="bold"),
             text_color=MUTED,
-        ).pack(anchor="w")
-
-        mode_row = ctk.CTkFrame(opt_inner, fg_color="transparent")
-        mode_row.pack(fill="x", pady=(8, 14))
-
+        ).pack(anchor="w", padx=20, pady=(18, 10))
+        mode_row = ctk.CTkFrame(options, fg_color="transparent")
+        mode_row.pack(fill="x", padx=20)
         self.mode_seg = ctk.CTkSegmentedButton(
             mode_row,
             values=["Video", "Audio MP3"],
             command=self._on_mode,
-            height=36,
-            font=ctk.CTkFont(size=13, weight="bold"),
+            height=40,
+            corner_radius=13,
+            font=ctk.CTkFont(size=12, weight="bold"),
             selected_color=ACCENT,
             selected_hover_color=ACCENT_HOVER,
-            unselected_color="#10131a",
-            unselected_hover_color="#1d2330",
+            unselected_color=field,
+            unselected_hover_color=soft,
         )
         self.mode_seg.set("Video")
         self.mode_seg.pack(side="left")
-
-        q_wrap = ctk.CTkFrame(mode_row, fg_color="transparent")
-        q_wrap.pack(side="right")
-        ctk.CTkLabel(q_wrap, text="Qualidade", text_color=MUTED, font=ctk.CTkFont(size=12)).pack(
-            side="left", padx=(0, 8)
-        )
         self.quality_menu = ctk.CTkOptionMenu(
-            q_wrap,
+            mode_row,
             variable=self.quality,
             values=["Melhor", "1080p", "720p", "480p", "360p"],
-            width=130,
-            height=36,
-            fg_color="#10131a",
-            button_color=ACCENT,
-            button_hover_color=ACCENT_HOVER,
-            dropdown_fg_color="#171b24",
-            font=ctk.CTkFont(size=13),
+            width=124,
+            height=40,
+            corner_radius=13,
+            fg_color=field,
+            button_color=soft,
+            button_hover_color="#303747",
+            dropdown_fg_color=CARD,
+            font=ctk.CTkFont(size=12),
         )
-        self.quality_menu.pack(side="left")
-
-        ctk.CTkLabel(
-            opt_inner,
-            text="Pasta de destino",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=MUTED,
-        ).pack(anchor="w")
-
-        dest_row = ctk.CTkFrame(opt_inner, fg_color="transparent")
-        dest_row.pack(fill="x", pady=(8, 0))
+        self.quality_menu.pack(side="right")
+        dest_row = ctk.CTkFrame(options, fg_color="transparent")
+        dest_row.pack(fill="x", padx=20, pady=(14, 12))
         self.dest_entry = ctk.CTkEntry(
             dest_row,
             textvariable=self.output_dir,
-            height=38,
-            corner_radius=10,
+            height=42,
+            corner_radius=13,
             border_width=0,
-            fg_color="#10131a",
+            fg_color=field,
             text_color=TEXT,
         )
         self.dest_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
         ctk.CTkButton(
             dest_row,
-            text="Escolher",
-            width=110,
-            height=38,
-            corner_radius=10,
-            fg_color="#2a3142",
-            hover_color="#343c52",
+            text="Pasta",
+            width=88,
+            height=42,
+            corner_radius=13,
+            fg_color=soft,
+            hover_color="#303747",
             command=self.pick_folder,
         ).pack(side="left")
+        self.download_btn = ctk.CTkButton(
+            options,
+            text="Baixar agora",
+            height=48,
+            corner_radius=15,
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self.start_download,
+        )
+        self.download_btn.pack(fill="x", padx=20, pady=(0, 20))
 
-        # Barra de status e progresso do download.
-        progress_card = ctk.CTkFrame(root, fg_color=CARD, corner_radius=16)
-        progress_card.pack(fill="x", pady=(0, 14))
-        p_inner = ctk.CTkFrame(progress_card, fg_color="transparent")
-        p_inner.pack(fill="x", padx=16, pady=16)
+        # Player destacado na coluna direita.
+        player_card = ctk.CTkFrame(
+            right,
+            fg_color="#17131a",
+            corner_radius=24,
+            border_width=1,
+            border_color="#32222a",
+        )
+        player_card.pack(fill="x", pady=(0, 14))
+        ctk.CTkLabel(
+            player_card,
+            text="TOCANDO AGORA",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=ACCENT,
+        ).pack(anchor="w", padx=22, pady=(22, 8))
+        self.now_playing_label = ctk.CTkLabel(
+            player_card,
+            text="Player parado",
+            text_color=TEXT,
+            anchor="w",
+            justify="left",
+            wraplength=330,
+            font=ctk.CTkFont(size=16, weight="bold"),
+        )
+        self.now_playing_label.pack(fill="x", padx=22, pady=(0, 18))
+        self.play_btn = ctk.CTkButton(
+            player_card,
+            text="Reproduzir link",
+            height=48,
+            corner_radius=16,
+            fg_color=TEXT,
+            text_color=BG,
+            hover_color="#dfe2e9",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self.start_player,
+        )
+        self.play_btn.pack(fill="x", padx=22)
+        controls = ctk.CTkFrame(player_card, fg_color="transparent")
+        controls.pack(fill="x", padx=18, pady=(14, 20))
+        player_buttons = (
+            ("⏮", self.previous_track),
+            ("⏸", self.pause_player),
+            ("▶", self.resume_player),
+            ("⏹", self.stop_player),
+            ("⏭", self.next_track),
+        )
+        for text, command in player_buttons:
+            ctk.CTkButton(
+                controls,
+                text=text,
+                width=40,
+                height=40,
+                corner_radius=13,
+                fg_color=soft,
+                hover_color="#343b4b",
+                font=ctk.CTkFont(size=15),
+                command=command,
+            ).pack(side="left", expand=True, padx=2)
 
+        # Status e log ocupam um unico card secundario.
+        activity = card(right)
+        activity.pack(fill="both", expand=True)
+        ctk.CTkLabel(
+            activity,
+            text="ATIVIDADE",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=MUTED,
+        ).pack(anchor="w", padx=20, pady=(18, 8))
         self.status_label = ctk.CTkLabel(
-            p_inner,
+            activity,
             textvariable=self.status_var,
             font=ctk.CTkFont(size=12),
             text_color=MUTED,
             anchor="w",
+            justify="left",
+            wraplength=340,
         )
-        self.status_label.pack(fill="x")
-
+        self.status_label.pack(fill="x", padx=20)
         self.progress = ctk.CTkProgressBar(
-            p_inner,
-            height=10,
+            activity,
+            height=7,
             corner_radius=8,
             progress_color=ACCENT,
-            fg_color="#10131a",
+            fg_color=field,
         )
-        self.progress.pack(fill="x", pady=(10, 0))
+        self.progress.pack(fill="x", padx=20, pady=(12, 14))
         self.progress.set(0)
-
-        # Log de eventos e ações do usuário.
         self.log_box = ctk.CTkTextbox(
-            root,
-            height=90,
-            fg_color=CARD,
+            activity,
+            height=150,
+            fg_color=surface,
+            border_width=0,
             text_color=MUTED,
-            font=ctk.CTkFont(family="Consolas", size=12),
-            corner_radius=12,
+            font=ctk.CTkFont(family="Consolas", size=11),
+            corner_radius=14,
             activate_scrollbars=True,
         )
-        self.log_box.pack(fill="both", expand=True, pady=(0, 14))
-        self.log_box.insert("end", "Pronto. Cole um link e clique em Buscar.\n")
+        self.log_box.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.log_box.insert("end", "Pronto. Cole um video ou playlist para comecar.\n")
         self.log_box.configure(state="disabled")
-
-        self.download_btn = ctk.CTkButton(
-            root,
-            text="Baixar",
-            height=48,
-            corner_radius=12,
-            fg_color=ACCENT,
-            hover_color=ACCENT_HOVER,
-            font=ctk.CTkFont(size=16, weight="bold"),
-            command=self.start_download,
-        )
-        self.download_btn.pack(fill="x")
-
-        self.play_btn = ctk.CTkButton(
-            root,
-            text="Tocar",
-            height=48,
-            corner_radius=12,
-            fg_color="#2a3142",
-            hover_color="#343c52",
-            font=ctk.CTkFont(size=16, weight="bold"),
-            command=self.start_player,
-        )
-        self.play_btn.pack(fill="x", pady=(0, 10))
-
-        # --- Controles do player ---
-        controls = ctk.CTkFrame(root, fg_color="transparent")
-        controls.pack(fill="x", pady=(10, 0))
-
-        ctk.CTkButton(controls, text="⏮ Voltar", command=lambda: self.skip_backward(10)).pack(side="left", padx=5)
-        ctk.CTkButton(controls, text="⏯ Pause", command=self.pause_player).pack(side="left", padx=5)
-        ctk.CTkButton(controls, text="▶ Play", command=self.resume_player).pack(side="left", padx=5)
-        ctk.CTkButton(controls, text="⏹ Stop", command=self.stop_player).pack(side="left", padx=5)
-        ctk.CTkButton(controls, text="⏭ Avançar", command=lambda: self.skip_forward(10)).pack(side="left", padx=5)
 
 
     def _on_mode(self, value: str):
@@ -386,6 +452,8 @@ class TubeGrab(ctk.CTk):
         try:
             info = get_video_info(url)
             self.info = info
+            is_playlist = info.get("_type") == "playlist"
+            entries = [entry for entry in (info.get("entries") or []) if entry]
             title = info.get("title") or "Sem titulo"
             channel = info.get("uploader") or info.get("channel") or "Canal desconhecido"
             duration = format_duration(info.get("duration"))
@@ -393,10 +461,14 @@ class TubeGrab(ctk.CTk):
 
             def _ui():
                 self.title_label.configure(text=title)
-                self.meta_label.configure(text=f"{channel}  ·  {duration}  ·  {views} views")
+                if is_playlist:
+                    self.meta_label.configure(text=f"Playlist  ·  {len(entries)} faixas  ·  {channel}")
+                else:
+                    self.meta_label.configure(text=f"{channel}  ·  {duration}  ·  {views} views")
 
             self.after(0, _ui)
-            self.set_status("Video encontrado. Escolha video ou audio e clique em Baixar.", OK)
+            kind = "Playlist" if is_playlist else "Video"
+            self.set_status(f"{kind} encontrado. Você pode tocar ou baixar.", OK)
             self.log(f"OK: {title}")
         except Exception as exc:
             self.info = None
@@ -479,60 +551,116 @@ class TubeGrab(ctk.CTk):
         finally:
             self.set_busy(False)
 
-    def _play_audio(self, url: str):
-        """Obtém o stream de áudio e toca com VLC."""
+    def _load_queue(self, url: str, load_generation: int):
+        """Carrega a fila sem bloquear a janela e inicia a primeira faixa."""
         try:
-            ydl_opts = {'format': 'bestaudio/best', 'quiet': True}
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                stream_url = info['url']
-                # Se já existe um player, parar antes de criar outro
-            if hasattr(self, "player") and self.player is not None:
-                self.player.stop()
+            self.set_status("Carregando fila de reprodução...", WARN)
+            entries = get_playback_entries(url)
 
-            self.log("Iniciando player de áudio...")
-            self.set_status("Tocando áudio em streaming...", OK)
-
-             # Criar e guardar player
-            self.player = vlc.MediaPlayer(stream_url)
-            self.player.play()
-
-            def monitor():
-                while True:
-                    state = self.player.get_state()
-                    if state in (vlc.State.Ended, vlc.State.Error):
-                        break
-                    time.sleep(1)
-
-            threading.Thread(target=monitor, daemon=True).start()
-
+            # Stop ou um novo link podem cancelar uma busca ainda em andamento.
+            if load_generation != self.playback_generation:
+                return
+            self.playlist = entries
+            self.playlist_index = 0
+            self.log(f"Fila carregada: {len(entries)} faixa(s).")
+            self._start_current_track()
         except Exception as exc:
-            self.log(f"Erro ao tocar áudio: {exc}")
-            self.set_status("Falha ao iniciar player.", ACCENT)
+            self.log(f"Erro ao carregar fila: {exc}")
+            self.set_status("Falha ao carregar a fila.", ACCENT)
+
+    def _start_current_track(self):
+        """Inicia uma nova geração do player para cancelar workers antigos."""
+        if not self.playlist or not 0 <= self.playlist_index < len(self.playlist):
+            return
+
+        self.playback_generation += 1
+        generation = self.playback_generation
+        if self.player is not None:
+            self.player.stop()
+            self.player = None
+
+        threading.Thread(
+            target=self._play_track_worker,
+            args=(self.playlist_index, generation),
+            daemon=True,
+        ).start()
+
+    def _play_track_worker(self, index: int, generation: int):
+        """Resolve e monitora uma faixa fora da thread gráfica."""
+        item = self.playlist[index]
+        try:
+            self.set_status(f"Preparando faixa {index + 1} de {len(self.playlist)}...", WARN)
+            stream_url = get_audio_stream_url(item["url"])
+
+            # Uma troca de faixa pode ocorrer enquanto o yt-dlp resolve a URL.
+            if generation != self.playback_generation:
+                return
+
+            player = vlc.MediaPlayer(stream_url)
+            self.player = player
+            player.play()
+            self.after(0, lambda: self.now_playing_label.configure(
+                text=f"{index + 1}/{len(self.playlist)}  ·  {item['title']}"
+            ))
+            self.set_status("Tocando áudio em streaming...", OK)
+            self.log(f"Tocando {index + 1}/{len(self.playlist)}: {item['title']}")
+
+            # O polling simples evita outra dependência e consome CPU desprezível.
+            while generation == self.playback_generation:
+                state = player.get_state()
+                if state == vlc.State.Ended:
+                    self.after(0, lambda: self._advance_after_end(generation))
+                    return
+                if state == vlc.State.Error:
+                    raise RuntimeError("O VLC não conseguiu reproduzir esta faixa.")
+                time.sleep(0.5)
+        except Exception as exc:
+            if generation == self.playback_generation:
+                self.log(f"Faixa indisponível: {item['title']} ({exc})")
+                # Pula automaticamente itens privados, removidos ou bloqueados.
+                self.after(0, lambda: self._advance_after_end(generation))
+
+    def _advance_after_end(self, generation: int):
+        """Avança automaticamente se nenhuma ação mais nova cancelou a faixa."""
+        if generation != self.playback_generation:
+            return
+        if self.playlist_index + 1 < len(self.playlist):
+            self.playlist_index += 1
+            self._start_current_track()
+        else:
+            self.set_status("Fim da fila de reprodução.", OK)
+            self.now_playing_label.configure(text="Fila concluída")
 
 
     # --- Controles extras ---
     def pause_player(self):
-        if hasattr(self, "player") and self.player is not None:
-            self.player.pause()
+        if self.player is not None:
+            self.player.set_pause(1)
 
     def stop_player(self):
-        if hasattr(self, "player") and self.player is not None:
+        # Invalidar a geração também encerra o monitor da thread anterior.
+        self.playback_generation += 1
+        if self.player is not None:
             self.player.stop()
+            self.player = None
+        self.set_status("Reprodução parada.", MUTED)
+        self.now_playing_label.configure(text="Player parado")
 
     def resume_player(self):
-        if hasattr(self, "player") and self.player is not None:
+        if self.player is not None:
             self.player.play()
 
-    def skip_forward(self, seconds=10):
-        if hasattr(self, "player") and self.player is not None:
-            pos = self.player.get_time()
-            self.player.set_time(pos + seconds * 1000)
+    def next_track(self):
+        """Vai para a próxima faixa da fila, quando existir."""
+        if self.playlist_index + 1 < len(self.playlist):
+            self.playlist_index += 1
+            self._start_current_track()
 
-    def skip_backward(self, seconds=10):
-        if hasattr(self, "player") and self.player is not None:
-            pos = self.player.get_time()
-            self.player.set_time(max(0, pos - seconds * 1000))
+    def previous_track(self):
+        """Volta para a faixa anterior da fila, quando existir."""
+        if self.playlist_index > 0:
+            self.playlist_index -= 1
+            self._start_current_track()
 
     def start_player(self):
         """Valida inputs e inicia o player de áudio."""
@@ -546,7 +674,14 @@ class TubeGrab(ctk.CTk):
             messagebox.showwarning("Link inválido", "Isso não parece um link do YouTube.")
             return
 
-        threading.Thread(target=self._play_audio, args=(url,), daemon=True).start()
+        # Um novo link substitui por completo a fila que estiver tocando.
+        self.stop_player()
+        load_generation = self.playback_generation
+        threading.Thread(
+            target=self._load_queue,
+            args=(url, load_generation),
+            daemon=True,
+        ).start()
 
 
 def main():
