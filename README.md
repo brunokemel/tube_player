@@ -40,6 +40,7 @@ dividida no pacote `tubegrab`:
 - `radio.py`: preferencias locais, consultas e pontuacao das recomendacoes.
 - `radio_controller.py`: conecta a radio, a fila e os controles da janela.
 - `stream_buffer.py`: cache temporario e pre-carga das proximas faixas.
+- `settings.py`: preferencias persistentes e valores padrao validados.
 - `offline.py`: descoberta e ordenacao de arquivos locais compativeis.
 - `models.py`: contrato compartilhado de uma faixa.
 - `ui/player_view.py`: construcao visual do card do player.
@@ -76,6 +77,7 @@ desktop precisem ser substituidos por componentes proprios do Android.
 
 - Layout moderno em duas colunas: conteudo e exportacao de um lado, player e
   atividade do outro.
+- Barra lateral fixa com atalhos para Inicio, Downloads, Biblioteca e Configuracoes.
 - Cards arredondados, contraste suave e acoes principais em destaque.
 - Player com miniatura, barra de tempo arrastavel e indicador de duracao.
 - Controle de volume independente, sem alterar o volume geral do Windows.
@@ -88,6 +90,24 @@ desktop precisem ser substituidos por componentes proprios do Android.
   pode nao ter a mesma precisao de recomendacao de grandes plataformas.
 - Interface rolavel para manter os controles acessiveis em telas com pouca altura.
 - Nenhum pacote visual pesado ou arquivo de imagem adicional e carregado.
+- Seletor no cabecalho com os temas **Azul moderno** e **Vidro neon**.
+- A preferencia visual e salva e restaurada automaticamente na proxima execucao.
+- A troca de tema reconstroi somente os widgets, preservando player e fila atuais.
+
+### Configuracoes
+
+O atalho **Configuracoes** abre uma janela dividida em sete areas:
+
+- Aparencia: tema, animacoes e modo compacto.
+- Reproducao: volume inicial, avancar automaticamente, aleatorio e retomada.
+- Downloads: pasta, formato, qualidade, nome dos arquivos e abertura da pasta.
+- Biblioteca: pasta raiz, leitura automatica e atualizacao manual.
+- Radio: variedade, tamanho dos lotes, lives, covers, remixes e aprendizado.
+- Desempenho: tamanho do buffer, modo economico e limpeza do cache.
+- Sistema: versoes de Python, yt-dlp e VLC e localizacao do FFmpeg.
+
+As preferencias ficam em `TubeGrab/settings.json` na pasta de configuracoes do
+usuario. O modo economico desativa miniaturas e pre-carregamento de streams.
 
 Use apenas com conteudo que voce tem direito de baixar.
 
@@ -252,13 +272,18 @@ TubeGrab/
     radio.py              Algoritmo local de recomendacao
     radio_controller.py   Integracao da radio com o player
     stream_buffer.py      Cache e pre-carregamento
+    settings.py           Preferencias persistentes
+    themes.py             Paletas e preferencia visual
     ui/
       player_view.py      Interface visual do player
+      settings_dialog.py  Janela de configuracoes
     utils.py              Funcoes auxiliares
     config.py             Configuracao visual
   tests/
     test_radio.py         Testes do ranqueamento e preferencias
     test_services.py      Testes de offline e buffer
+    test_themes.py        Testes das paletas e persistencia
+    test_settings.py      Testes das preferencias gerais
   requirements.txt        Dependencias Python
   README.md               Este manual
 ```

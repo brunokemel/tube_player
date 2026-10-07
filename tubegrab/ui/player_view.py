@@ -2,17 +2,21 @@
 
 import customtkinter as ctk
 
-from ..config import ACCENT, ACCENT_HOVER, BG, MUTED, TEXT
-
 
 def build_player_view(app, parent, soft: str):
     """Monta o card do player e registra seus controles na janela principal."""
+    theme = app.theme
+    ACCENT = theme["accent"]
+    ACCENT_HOVER = theme["accent_hover"]
+    BG = theme["bg"]
+    MUTED = theme["muted"]
+    TEXT = theme["text"]
     card = ctk.CTkFrame(
         parent,
-        fg_color="#17131a",
+        fg_color=theme["player_bg"],
         corner_radius=24,
         border_width=1,
-        border_color="#32222a",
+        border_color=theme["player_border"],
     )
     card.pack(fill="x", pady=(0, 14))
     ctk.CTkLabel(
@@ -27,7 +31,7 @@ def build_player_view(app, parent, soft: str):
         text="Nenhuma miniatura",
         height=168,
         corner_radius=18,
-        fg_color="#0d1017",
+        fg_color=theme["surface"],
         text_color=MUTED,
         font=ctk.CTkFont(size=12),
     )
@@ -49,7 +53,7 @@ def build_player_view(app, parent, soft: str):
         to=1000,
         number_of_steps=1000,
         height=16,
-        fg_color="#29232b",
+        fg_color=theme["field"],
         progress_color=ACCENT,
         button_color=TEXT,
         button_hover_color="#ffffff",
@@ -89,8 +93,8 @@ def build_player_view(app, parent, soft: str):
         corner_radius=13,
         fg_color="transparent",
         border_width=1,
-        border_color="#3a3039",
-        hover_color="#261f27",
+        border_color=theme["border"],
+        hover_color=theme["field"],
         text_color=MUTED,
         font=ctk.CTkFont(size=12, weight="bold"),
         command=app.open_offline_playlist,
@@ -105,7 +109,7 @@ def build_player_view(app, parent, soft: str):
         height=38,
         corner_radius=12,
         fg_color=soft,
-        hover_color="#343b4b",
+        hover_color=theme["border"],
         font=ctk.CTkFont(size=12, weight="bold"),
         command=app.toggle_radio,
     )
@@ -135,8 +139,8 @@ def build_player_view(app, parent, soft: str):
 
     controls = ctk.CTkFrame(card, fg_color="transparent")
     controls.pack(fill="x", padx=18, pady=(14, 10))
-    app.shuffle_btn = _control(controls, "⇄", app.toggle_shuffle, soft)
-    _control(controls, "⏮", app.previous_track, soft)
+    app.shuffle_btn = _control(controls, "⇄", app.toggle_shuffle, soft, theme["border"])
+    _control(controls, "⏮", app.previous_track, soft, theme["border"])
     app.play_pause_btn = ctk.CTkButton(
         controls,
         text="▶",
@@ -149,8 +153,8 @@ def build_player_view(app, parent, soft: str):
         command=app.toggle_play_pause,
     )
     app.play_pause_btn.pack(side="left", expand=True, padx=4)
-    _control(controls, "⏭", app.next_track, soft)
-    _control(controls, "⏹", app.stop_player, soft)
+    _control(controls, "⏭", app.next_track, soft, theme["border"])
+    _control(controls, "⏹", app.stop_player, soft, theme["border"])
 
     volume_row = ctk.CTkFrame(card, fg_color="transparent")
     volume_row.pack(fill="x", padx=22, pady=(0, 12))
@@ -167,7 +171,7 @@ def build_player_view(app, parent, soft: str):
         to=100,
         number_of_steps=100,
         height=14,
-        fg_color="#29232b",
+        fg_color=theme["field"],
         progress_color=ACCENT,
         button_color=TEXT,
         button_hover_color="#ffffff",
@@ -191,8 +195,8 @@ def build_player_view(app, parent, soft: str):
         corner_radius=12,
         fg_color="transparent",
         border_width=1,
-        border_color="#3a3039",
-        hover_color="#261f27",
+        border_color=theme["border"],
+        hover_color=theme["field"],
         text_color=MUTED,
         command=app.toggle_playlist,
     )
@@ -200,13 +204,13 @@ def build_player_view(app, parent, soft: str):
     app.playlist_panel = ctk.CTkScrollableFrame(
         card,
         height=210,
-        fg_color="#0f1118",
+        fg_color=theme["surface"],
         corner_radius=14,
         scrollbar_button_color=soft,
     )
 
 
-def _control(parent, text: str, command, color: str):
+def _control(parent, text: str, command, color: str, hover: str):
     """Cria um dos controles compactos e retorna o botao para atualizacoes."""
     button = ctk.CTkButton(
         parent,
@@ -215,7 +219,7 @@ def _control(parent, text: str, command, color: str):
         height=44,
         corner_radius=14,
         fg_color=color,
-        hover_color="#343b4b",
+        hover_color=hover,
         command=command,
     )
     button.pack(side="left", expand=True, padx=2)

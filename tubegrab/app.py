@@ -37,27 +37,37 @@ from .download_controller import DownloadController
 from .offline import scan_offline_playlist
 from .radio import RadioEngine
 from .radio_controller import RadioController
+from .settings import Settings
 from .stream_buffer import StreamBuffer
+from .themes import DEFAULT_THEME, THEMES
 from .ui.about_dialog import show_about_dialog
 from .ui.player_view import build_player_view
+from .ui.settings_dialog import show_settings_dialog
+from .ui.sidebar import build_sidebar
 from .utils import downloads_dir, format_duration, is_youtube_url
 
 
 class TubeGrab(DownloadController, RadioController, ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.settings = Settings()
+        self.theme_name = self.settings.get("theme")
+        if self.theme_name not in THEMES:
+            self.theme_name = DEFAULT_THEME
+        self.theme = THEMES[self.theme_name]
         self.title(APP_TITLE)
         self.geometry(WINDOW_SIZE)
-        self.minsize(820, 620)
-        self.configure(fg_color=BG)
+        self.minsize(900, 620)
+        self.configure(fg_color=self.theme["bg"])
 
         # Estado da aplicação e controles da interface.
         self.info = None
         self.busy = False
-        self.output_dir = ctk.StringVar(value=downloads_dir())
-        self.mode = ctk.StringVar(value="video")
-        self.quality = ctk.StringVar(value="1080p")
-        self.url_var = ctk.StringVar()
+        self.output_dir = ctk.StringVar(value=self.settings.get("download_folder"))
+        self.mode = ctk.StringVar(value=self.settings.get("default_mode"))
+        self.quality = ctk.StringVar(value=self.settings.get("default_quality"))
+        remembered_url = self.settings.get("last_url") if self.settings.get("remember_playback") else ""
+        self.url_var = ctk.StringVar(value=remembered_url)
         self.status_var = ctk.StringVar(value="Cole o link do YouTube para comecar")
         self.progress_value = 0.0
 
@@ -67,16 +77,21 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         self.playlist_index = -1
         self.playback_generation = 0
         self.player = None
-        self.shuffle_enabled = False
+        self.shuffle_enabled = bool(self.settings.get("shuffle_on_start"))
         self.playlist_visible = False
         self.user_seeking = False
         self.thumbnail_image = None
-        self.player_volume = 80
+        self.player_volume = self.settings.get("default_volume")
 
         # O buffer guarda apenas URLs e metadados das proximas faixas, nunca o
         # arquivo de audio. Um lock protege o cache entre as threads do player.
         self.stream_buffer = StreamBuffer()
         self.queue_generation = 0
+        self.pending_resume_ms = (
+            self.settings.get("last_position_ms")
+            if self.settings.get("remember_playback")
+            else 0
+        )
         self.radio = RadioEngine()
         self.radio_enabled = False
         self.radio_loading = False
@@ -86,6 +101,8 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         self._build()
         self.after(80, self._center)
         self.after(500, self._refresh_player_progress)
+        self.after(350, self._load_startup_library)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _center(self):
         """Centraliza a janela na tela ao abrir o app."""
@@ -99,38 +116,46 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
 
     def _build(self):
         """Monta a interface em duas colunas, com hierarquia visual mais leve."""
-        surface = "#0d1017"
-        field = "#191d27"
-        soft = "#242936"
+        # Nomes locais permitem que toda a arvore visual use a paleta ativa sem
+        # acoplar os servicos de player/download ao sistema de temas.
+        BG = self.theme["bg"]
+        CARD = self.theme["card"]
+        ACCENT = self.theme["accent"]
+        ACCENT_HOVER = self.theme["accent_hover"]
+        TEXT = self.theme["text"]
+        MUTED = self.theme["muted"]
+        surface = self.theme["surface"]
+        field = self.theme["field"]
+        soft = self.theme["soft"]
+        page_padding = 18 if self.settings.get("compact_mode") else 32
+
+        # A barra lateral permanece fixa enquanto o conteudo central pode rolar.
+        shell = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
+        shell.pack(fill="both", expand=True)
+        self.shell = shell
+        build_sidebar(self, shell)
 
         # O scroll mantem todo o conteudo acessivel em telas com pouca altura.
         root = ctk.CTkScrollableFrame(
-            self,
+            shell,
             fg_color=BG,
             corner_radius=0,
             scrollbar_button_color=soft,
-            scrollbar_button_hover_color="#303747",
+            scrollbar_button_hover_color=self.theme["border"],
         )
-        root.pack(fill="both", expand=True)
+        root.pack(side="right", fill="both", expand=True)
+        self.content_scroll = root
         root.grid_columnconfigure(0, weight=3, uniform="content")
         root.grid_columnconfigure(1, weight=2, uniform="content")
 
-        # Cabecalho compacto com uma marca simples, sem carregar imagens externas.
+        # Cabecalho compacto; a marca principal agora vive na barra lateral.
         header = ctk.CTkFrame(root, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=32, pady=(26, 22))
-        brand = ctk.CTkLabel(
-            header,
-            text="TG",
-            width=46,
-            height=46,
-            corner_radius=15,
-            fg_color=ACCENT,
-            text_color="#ffffff",
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+        header.grid(
+            row=0, column=0, columnspan=2, sticky="ew",
+            padx=page_padding, pady=(18 if page_padding == 18 else 26, 18),
         )
-        brand.pack(side="left")
         heading = ctk.CTkFrame(header, fg_color="transparent")
-        heading.pack(side="left", padx=(14, 0))
+        heading.pack(side="left")
         ctk.CTkLabel(
             heading,
             text="TubeGrab",
@@ -149,16 +174,30 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             width=82,
             height=38,
             corner_radius=13,
-            fg_color="#191d27",
-            hover_color="#282e3a",
+            fg_color=field,
+            hover_color=self.theme["border"],
             text_color=MUTED,
             command=lambda: show_about_dialog(self),
         ).pack(side="right")
+        self.theme_selector = ctk.CTkOptionMenu(
+            header,
+            variable=ctk.StringVar(value=self.theme_name),
+            values=list(THEMES),
+            width=145,
+            height=38,
+            corner_radius=13,
+            fg_color=field,
+            button_color=soft,
+            button_hover_color=self.theme["border"],
+            dropdown_fg_color=CARD,
+            command=self.change_theme,
+        )
+        self.theme_selector.pack(side="right", padx=(0, 8))
 
         left = ctk.CTkFrame(root, fg_color="transparent")
-        left.grid(row=1, column=0, sticky="nsew", padx=(32, 10), pady=(0, 28))
+        left.grid(row=1, column=0, sticky="nsew", padx=(page_padding, 8), pady=(0, 22))
         right = ctk.CTkFrame(root, fg_color="transparent")
-        right.grid(row=1, column=1, sticky="nsew", padx=(10, 32), pady=(0, 28))
+        right.grid(row=1, column=1, sticky="nsew", padx=(8, page_padding), pady=(0, 22))
 
         def card(parent):
             """Cria a superficie padrao usada pelos blocos da interface."""
@@ -167,7 +206,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
                 fg_color=CARD,
                 corner_radius=22,
                 border_width=1,
-                border_color="#202530",
+                border_color=self.theme["border"],
             )
 
         # Entrada principal: link e busca ficam em uma unica linha.
@@ -188,7 +227,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             height=48,
             corner_radius=15,
             border_width=1,
-            border_color="#282e3a",
+            border_color=self.theme["border"],
             fg_color=field,
             text_color=TEXT,
             font=ctk.CTkFont(size=13),
@@ -238,6 +277,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
 
         # Opcoes de exportacao agrupadas sem divisorias pesadas.
         options = card(left)
+        self.options_card = options
         options.pack(fill="x")
         ctk.CTkLabel(
             options,
@@ -259,7 +299,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             unselected_color=field,
             unselected_hover_color=soft,
         )
-        self.mode_seg.set("Video")
+        self.mode_seg.set("Audio MP3" if self.mode.get() == "audio" else "Video")
         self.mode_seg.pack(side="left")
         self.quality_menu = ctk.CTkOptionMenu(
             mode_row,
@@ -270,7 +310,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             corner_radius=13,
             fg_color=field,
             button_color=soft,
-            button_hover_color="#303747",
+            button_hover_color=self.theme["border"],
             dropdown_fg_color=CARD,
             font=ctk.CTkFont(size=12),
         )
@@ -294,7 +334,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             height=42,
             corner_radius=13,
             fg_color=soft,
-            hover_color="#303747",
+            hover_color=self.theme["border"],
             command=self.pick_folder,
         ).pack(side="left")
         self.download_btn = ctk.CTkButton(
@@ -353,6 +393,108 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         self.log_box.insert("end", "Pronto. Cole um video ou playlist para comecar.\n")
         self.log_box.configure(state="disabled")
 
+    def change_theme(self, name: str):
+        """Reconstroi apenas os widgets e preserva fila, player e downloads."""
+        if name == self.theme_name:
+            return
+        if self.busy:
+            messagebox.showwarning(
+                "Operacao em andamento",
+                "Aguarde a busca ou o download terminar para trocar o tema.",
+            )
+            self.theme_selector.set(self.theme_name)
+            return
+        try:
+            self.settings.update({"theme": name})
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Tema", f"Nao foi possivel salvar o tema:\n{exc}")
+            self.theme_selector.set(self.theme_name)
+            return
+
+        self.theme_name = name
+        self.theme = THEMES[name]
+        self._rebuild_interface()
+
+    def _rebuild_interface(self):
+        """Recria widgets apos mudancas visuais sem interromper o VLC."""
+        self.configure(fg_color=self.theme["bg"])
+        current_shell = getattr(self, "shell", None)
+        if current_shell is not None and current_shell.winfo_exists():
+            current_shell.destroy()
+        self.playlist_visible = False
+        self._build()
+
+        # Restaura o estado visual associado a uma reproducao em andamento.
+        if self.playlist:
+            self._populate_playlist()
+            if 0 <= self.playlist_index < len(self.playlist):
+                item = self.playlist[self.playlist_index]
+                self.now_playing_label.configure(
+                    text=f"{self.playlist_index + 1}/{len(self.playlist)}  ·  {item['title']}"
+                )
+                if self.thumbnail_image is not None and not item.get("offline"):
+                    self.thumbnail_label.configure(image=self.thumbnail_image, text="")
+        if self.radio_enabled:
+            self.radio_btn.configure(text="Radio ligada", fg_color=self.theme["accent"])
+        if self.shuffle_enabled:
+            self.shuffle_btn.configure(fg_color=self.theme["accent"])
+
+    def apply_settings(self, values: dict):
+        """Persiste preferencias e aplica imediatamente o que for seguro."""
+        old_theme = self.theme_name
+        old_compact = self.settings.get("compact_mode")
+        self.settings.update(values)
+
+        self.output_dir.set(self.settings.get("download_folder"))
+        self.mode.set(self.settings.get("default_mode"))
+        self.quality.set(self.settings.get("default_quality"))
+        self.player_volume = self.settings.get("default_volume")
+        self.shuffle_enabled = bool(self.settings.get("shuffle_on_start"))
+        if self.player is not None:
+            self.player.audio_set_volume(self.player_volume)
+
+        new_theme = self.settings.get("theme")
+        visual_changed = new_theme != old_theme or self.settings.get("compact_mode") != old_compact
+        if new_theme in THEMES:
+            self.theme_name = new_theme
+            self.theme = THEMES[new_theme]
+        if visual_changed and not self.busy:
+            self._rebuild_interface()
+        elif not visual_changed:
+            self.volume_slider.set(self.player_volume)
+            self.volume_label.configure(text=f"{self.player_volume}%")
+            selected_mode = "Audio MP3" if self.mode.get() == "audio" else "Video"
+            self.mode_seg.set(selected_mode)
+            self.quality_menu.configure(
+                state="disabled" if self.mode.get() == "audio" else "normal"
+            )
+            self.shuffle_btn.configure(
+                fg_color=(
+                    self.theme["accent"] if self.shuffle_enabled else self.theme["soft"]
+                )
+            )
+
+    def navigate_to(self, section: str):
+        """Executa os atalhos laterais e atualiza seu destaque visual."""
+        for name, button in self.nav_buttons.items():
+            active = name == section
+            button.configure(
+                fg_color=self.theme["soft"] if active else "transparent",
+                text_color=self.theme["text"] if active else self.theme["muted"],
+            )
+
+        canvas = self.content_scroll._parent_canvas
+        if section == "inicio":
+            canvas.yview_moveto(0)
+        elif section == "downloads":
+            canvas.yview_moveto(0.35)
+            self.dest_entry.focus_set()
+            self.set_status("Escolha o formato, a pasta e inicie o download.")
+        elif section == "biblioteca":
+            self.open_offline_playlist()
+        elif section == "configuracoes":
+            show_settings_dialog(self)
+
 
     def _on_mode(self, value: str):
         """Ativa ou desativa a qualidade ao mudar entre vídeo e áudio."""
@@ -368,6 +510,10 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         path = ctk.filedialog.askdirectory(initialdir=self.output_dir.get() or downloads_dir())
         if path:
             self.output_dir.set(path)
+            try:
+                self.settings.update({"download_folder": path})
+            except OSError:
+                pass
 
     def log(self, message: str):
         """Adiciona uma mensagem ao log da interface em modo thread-safe."""
@@ -416,7 +562,13 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             if load_generation != self.playback_generation:
                 return
             self.playlist = entries
-            self.playlist_index = 0
+            remembered_index = self.settings.get("last_index")
+            same_url = url == self.settings.get("last_url")
+            self.playlist_index = (
+                max(0, min(int(remembered_index), len(entries) - 1))
+                if same_url and self.settings.get("remember_playback")
+                else 0
+            )
             self.stream_buffer.clear()
             self.log(f"Fila carregada: {len(entries)} faixa(s).")
             self.after(0, self._populate_playlist)
@@ -475,8 +627,12 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             self.player = player
             player.audio_set_volume(self.player_volume)
             player.play()
+            if self.pending_resume_ms:
+                resume_ms = self.pending_resume_ms
+                self.pending_resume_ms = 0
+                self.after(1200, lambda: self._apply_resume_position(player, generation, resume_ms))
             self.after(0, lambda: self._show_current_track(index, item))
-            if item.get("thumbnail"):
+            if item.get("thumbnail") and not self.settings.get("economy_mode"):
                 threading.Thread(
                     target=self._load_thumbnail,
                     args=(item["thumbnail"], generation),
@@ -505,6 +661,10 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
     def _advance_after_end(self, generation: int):
         """Avança automaticamente se nenhuma ação mais nova cancelou a faixa."""
         if generation != self.playback_generation:
+            return
+        if not self.settings.get("autoplay"):
+            self.set_status("Faixa concluida. Reproducao automatica desativada.", OK)
+            self.play_pause_btn.configure(text="▶")
             return
         next_index = self._next_track_index()
         if next_index is not None:
@@ -579,6 +739,11 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
                 self.player.set_time(int(duration * self.timeline.get() / 1000))
         self.user_seeking = False
 
+    def _apply_resume_position(self, player, generation: int, position_ms: int):
+        """Restaura a posicao somente se a mesma faixa ainda estiver ativa."""
+        if generation == self.playback_generation and self.player is player:
+            player.set_time(int(position_ms))
+
     def _load_thumbnail(self, url: str, generation: int):
         """Baixa somente a miniatura atual em uma thread descartavel."""
         try:
@@ -627,7 +792,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
                 corner_radius=10,
                 anchor="w",
                 fg_color="transparent",
-                hover_color="#242936",
+                hover_color=self.theme["soft"],
                 text_color=MUTED,
                 command=lambda selected=index: self.select_playlist_track(selected),
             )
@@ -641,8 +806,8 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         for index, button in enumerate(getattr(self, "playlist_buttons", [])):
             active = index == self.playlist_index
             button.configure(
-                fg_color="#312129" if active else "transparent",
-                text_color=TEXT if active else MUTED,
+                fg_color=self.theme["soft"] if active else "transparent",
+                text_color=self.theme["text"] if active else self.theme["muted"],
             )
 
     def toggle_playlist(self):
@@ -670,18 +835,28 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         if not folder:
             return
 
+        self._load_offline_folder(folder, autoplay=True)
+
+    def _load_offline_folder(self, folder: str, autoplay: bool):
+        """Carrega uma biblioteca escolhida ou configurada para iniciar com o app."""
         tracks = scan_offline_playlist(folder)
         if not tracks:
-            messagebox.showwarning(
-                "Playlist vazia",
-                "Nenhum arquivo de audio ou video compativel foi encontrado nessa pasta ou nas subpastas.",
-            )
+            if autoplay:
+                messagebox.showwarning(
+                    "Playlist vazia",
+                    "Nenhum arquivo de audio ou video compativel foi encontrado nessa pasta ou nas subpastas.",
+                )
             return
 
         self.stop_player()
         self.queue_generation += 1
         self.playlist = tracks
-        self.playlist_index = 0
+        remembered_url = self.settings.get("last_url")
+        remembered = next(
+            (index for index, item in enumerate(tracks) if item.get("url") == remembered_url),
+            0,
+        )
+        self.playlist_index = remembered if self.settings.get("remember_playback") else 0
         self.stream_buffer.clear()
         self._populate_playlist()
         collections = {
@@ -693,14 +868,44 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             f"{len(collections)} pasta(s)."
         )
         self.set_status("Biblioteca offline pronta. Nenhuma conexao sera usada.", OK)
-        self._start_current_track()
+        if autoplay:
+            self._start_current_track()
+
+    def _load_startup_library(self):
+        """Indexa a biblioteca configurada sem iniciar som inesperadamente."""
+        folder = self.settings.get("library_root")
+        if self.settings.get("scan_library_on_start") and folder and Path(folder).is_dir():
+            self._load_offline_folder(folder, autoplay=False)
+
+    def _on_close(self):
+        """Salva o ponto atual e encerra o VLC antes de fechar a janela."""
+        values = {}
+        if self.settings.get("remember_playback"):
+            current_url = self.url_var.get().strip()
+            if (
+                0 <= self.playlist_index < len(self.playlist)
+                and self.playlist[self.playlist_index].get("offline")
+            ):
+                current_url = self.playlist[self.playlist_index].get("url", current_url)
+            values = {
+                "last_url": current_url,
+                "last_index": max(0, self.playlist_index),
+                "last_position_ms": max(0, self.player.get_time()) if self.player else 0,
+            }
+        try:
+            self.settings.update(values)
+        except OSError:
+            pass
+        if self.player is not None:
+            self.player.stop()
+        self.destroy()
 
     def toggle_shuffle(self):
         """Ativa ou desativa a escolha aleatoria da proxima faixa."""
         self.shuffle_enabled = not self.shuffle_enabled
         self.shuffle_btn.configure(
-            fg_color=ACCENT if self.shuffle_enabled else "#242936",
-            text_color="#ffffff" if self.shuffle_enabled else TEXT,
+            fg_color=self.theme["accent"] if self.shuffle_enabled else self.theme["soft"],
+            text_color="#ffffff" if self.shuffle_enabled else self.theme["text"],
         )
         state = "ativada" if self.shuffle_enabled else "desativada"
         self.set_status(f"Reproducao aleatoria {state}.", OK if self.shuffle_enabled else MUTED)
@@ -742,6 +947,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             current_generation=lambda: self.queue_generation,
             resolver=get_audio_stream_info,
             log=self.log,
+            count=0 if self.settings.get("economy_mode") else self.settings.get("buffer_size"),
         )
 
     def toggle_play_pause(self):

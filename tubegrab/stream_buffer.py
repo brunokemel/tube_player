@@ -82,15 +82,19 @@ class StreamBuffer:
         current_generation: Callable[[], int],
         resolver: Resolver,
         log: Logger,
+        count: int = 2,
     ):
         """Inicia um worker sequencial para ate duas faixas provaveis."""
-        if len(playlist) < 2:
+        count = max(0, min(5, int(count)))
+        if len(playlist) < 2 or count == 0:
             return
         if shuffle:
             available = [i for i in range(len(playlist)) if i != current_index]
-            indices = random.sample(available, min(2, len(available)))
+            indices = random.sample(available, min(count, len(available)))
         else:
-            indices = list(range(current_index + 1, min(current_index + 3, len(playlist))))
+            indices = list(
+                range(current_index + 1, min(current_index + count + 1, len(playlist)))
+            )
 
         threading.Thread(
             target=self._worker,

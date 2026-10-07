@@ -142,7 +142,14 @@ def search_music_candidates(queries: list[str], results_per_query: int = 8) -> l
     return candidates
 
 
-def download_media(url: str, mode: str, quality: str, output_dir: str, progress_hook):
+def download_media(
+    url: str,
+    mode: str,
+    quality: str,
+    output_dir: str,
+    progress_hook,
+    filename_template: str = "%(title)s.%(ext)s",
+):
     """Faz o download do vídeo ou áudio conforme a opção escolhida."""
     if yt_dlp is None:
         raise RuntimeError("yt-dlp nao esta instalado.")
@@ -150,9 +157,9 @@ def download_media(url: str, mode: str, quality: str, output_dir: str, progress_
     playlist = is_playlist_url(url)
     # Playlists ganham uma subpasta e numeração para manter a ordem original.
     filename = (
-        "%(playlist_title)s/%(playlist_index)03d - %(title)s.%(ext)s"
+        f"%(playlist_title)s/%(playlist_index)03d - {filename_template}"
         if playlist
-        else "%(title)s.%(ext)s"
+        else filename_template
     )
     outtmpl = os.path.join(output_dir, filename)
     audio_only = mode == "audio"

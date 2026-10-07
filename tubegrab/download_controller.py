@@ -1,6 +1,8 @@
 """Fluxo de consulta e download, separado da janela principal."""
 
 import os
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from tkinter import messagebox
@@ -120,7 +122,14 @@ class DownloadController:
         audio = self.mode.get() == "audio"
         quality = self.quality.get()
         try:
-            download_media(url, self.mode.get(), quality, dest, self._progress_hook)
+            download_media(
+                url,
+                self.mode.get(),
+                quality,
+                dest,
+                self._progress_hook,
+                filename_template=self.settings.get("filename_template"),
+            )
             kind = "audio MP3" if audio else "video"
             self.set_status(f"Download concluido. Arquivo salvo em {dest}", OK)
             self.log(f"Concluido ({kind}). Pasta: {dest}")
@@ -128,9 +137,24 @@ class DownloadController:
                 0,
                 lambda: messagebox.showinfo("Pronto", f"{kind.capitalize()} salvo em:\n{dest}"),
             )
+            if self.settings.get("open_folder_after_download"):
+                self.after(0, lambda: self._open_download_folder(dest))
         except Exception as exc:
             self.set_status("Falha no download.", ACCENT)
             self.log(f"Erro: {exc}")
             self.after(0, lambda: messagebox.showerror("Erro", f"Falha no download:\n{exc}"))
         finally:
             self.set_busy(False)
+
+    @staticmethod
+    def _open_download_folder(path: str):
+        """Abre a pasta usando o gerenciador nativo do sistema."""
+        try:
+            if os.name == "nt":
+                os.startfile(path)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except OSError:
+            pass

@@ -43,6 +43,22 @@ class RadioEngineTests(unittest.TestCase):
         self.assertNotIn("music", tokens)
         self.assertIn("cancao", tokens)
 
+    def test_optional_content_filters_are_respected(self):
+        seed = {"url": "seed", "title": "Cancao Azul", "uploader": "Artista"}
+        candidates = [
+            {"url": "live", "title": "Cancao Azul Ao Vivo", "uploader": "Artista", "duration": 240},
+            {"url": "cover", "title": "Cancao Azul Cover", "uploader": "Outro", "duration": 220},
+            {"url": "studio", "title": "Cancao Azul", "uploader": "Artista", "duration": 210},
+        ]
+        ranked = self.radio.rank(
+            seed,
+            candidates,
+            {"seed"},
+            allow_lives=False,
+            allow_covers=False,
+        )
+        self.assertEqual([item["url"] for item in ranked], ["studio"])
+
 
 if __name__ == "__main__":
     unittest.main()

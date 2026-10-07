@@ -5,8 +5,6 @@ from tkinter import TclError
 
 import customtkinter as ctk
 
-from ..config import ACCENT, ACCENT_HOVER, BG, CARD, MUTED, TEXT
-
 
 ABOUT_TEXT = (
     "Este é um aplicativo independente e gratuito, desenvolvido por mim, "
@@ -20,6 +18,7 @@ ABOUT_TEXT = (
 
 def show_about_dialog(parent):
     """Abre uma unica janela Sobre e aplica animacoes de entrada e texto."""
+    theme = parent.theme
     current = getattr(parent, "about_window", None)
     if current is not None and current.winfo_exists():
         current.focus()
@@ -30,7 +29,7 @@ def show_about_dialog(parent):
     window.title("Sobre o TubeGrab")
     window.geometry("540x430")
     window.resizable(False, False)
-    window.configure(fg_color=BG)
+    window.configure(fg_color=theme["bg"])
     window.transient(parent)
 
     # A transparência produz uma entrada suave quando o sistema oferece suporte.
@@ -41,10 +40,10 @@ def show_about_dialog(parent):
 
     content = ctk.CTkFrame(
         window,
-        fg_color=CARD,
+        fg_color=theme["card"],
         corner_radius=24,
         border_width=1,
-        border_color="#262c38",
+        border_color=theme["border"],
     )
     content.pack(fill="both", expand=True, padx=22, pady=22)
 
@@ -54,14 +53,14 @@ def show_about_dialog(parent):
         width=52,
         height=52,
         corner_radius=17,
-        fg_color=ACCENT,
+        fg_color=theme["accent"],
         text_color="#ffffff",
         font=ctk.CTkFont(size=16, weight="bold"),
     ).pack(pady=(24, 10))
     ctk.CTkLabel(
         content,
         text="Feito com cuidado por Bruno Kemel",
-        text_color=TEXT,
+        text_color=theme["text"],
         font=ctk.CTkFont(size=19, weight="bold"),
     ).pack()
 
@@ -73,7 +72,7 @@ def show_about_dialog(parent):
         wraplength=445,
         justify="left",
         anchor="nw",
-        text_color=MUTED,
+        text_color=theme["muted"],
         font=ctk.CTkFont(size=12),
     )
     animated_text.pack(padx=28, pady=(16, 10))
@@ -85,8 +84,8 @@ def show_about_dialog(parent):
         text="Enviar sugestão",
         height=42,
         corner_radius=13,
-        fg_color=ACCENT,
-        hover_color=ACCENT_HOVER,
+        fg_color=theme["accent"],
+        hover_color=theme["accent_hover"],
         command=lambda: webbrowser.open("mailto:br.kemel@gmail.com"),
     ).pack(side="left", fill="x", expand=True, padx=(0, 5))
     ctk.CTkButton(
@@ -94,13 +93,20 @@ def show_about_dialog(parent):
         text="Conhecer meu trabalho",
         height=42,
         corner_radius=13,
-        fg_color="#242936",
-        hover_color="#343b4b",
+        fg_color=theme["soft"],
+        hover_color=theme["border"],
         command=lambda: webbrowser.open("https://devkemel.com.br"),
     ).pack(side="left", fill="x", expand=True, padx=(5, 0))
 
-    _fade_in(window)
-    _type_text(window, animated_text)
+    if parent.settings.get("animations"):
+        _fade_in(window)
+        _type_text(window, animated_text)
+    else:
+        try:
+            window.attributes("-alpha", 1.0)
+        except TclError:
+            pass
+        animated_text.configure(text=ABOUT_TEXT)
 
 
 def _fade_in(window, alpha: float = 0.0):

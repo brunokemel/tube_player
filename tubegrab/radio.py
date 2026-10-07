@@ -82,6 +82,14 @@ class RadioEngine:
         self.preferences[target] = self.preferences[target][-100:]
         self._save()
 
+    def reset_preferences(self):
+        """Apaga curtidas e rejeicoes sem afetar outras configuracoes do app."""
+        self.preferences = {"likes": [], "dislikes": []}
+        self._save()
+
+    def preference_counts(self) -> tuple[int, int]:
+        return len(self.preferences["likes"]), len(self.preferences["dislikes"])
+
     def build_queries(self, seed: dict) -> list[str]:
         """Monta buscas curtas usando a faixa atual e gostos ja aprendidos."""
         title_tokens = sorted(music_tokens({"title": seed.get("title", "")}))[:4]
@@ -98,7 +106,17 @@ class RadioEngine:
         # Remove buscas vazias ou repetidas preservando a ordem.
         return list(dict.fromkeys(query for query in queries if len(query) > 5))
 
-    def rank(self, seed: dict, candidates: list[dict], existing_urls: set[str], limit=6):
+    def rank(
+        self,
+        seed: dict,
+        candidates: list[dict],
+        existing_urls: set[str],
+        limit=6,
+        diversity=50,
+        allow_lives=False,
+        allow_covers=True,
+        allow_remixes=True,
+    ):
         """Pontua semelhanca, preferencias e variedade de forma deterministica."""
         seed_tokens = music_tokens(seed)
         liked_tokens = set().union(
@@ -112,6 +130,7 @@ class RadioEngine:
 
         ranked = []
         seen = set(existing_urls)
+        similarity_weight = max(1.0, (100 - int(diversity)) / 20)
         for candidate in candidates:
             url = candidate.get("url")
             if not url or url in seen or url in disliked_urls:
@@ -123,14 +142,23 @@ class RadioEngine:
             # Evita Shorts muito curtos e mixes/lives excessivamente longos.
             if duration and not 75 <= duration <= 900:
                 continue
+            title = candidate.get("title", "").casefold()
+            if not allow_lives and any(word in title for word in (" live", "ao vivo", "concert")):
+                continue
+            if not allow_covers and "cover" in title:
+                continue
+            if not allow_remixes and any(word in title for word in ("remix", "mix ")):
+                continue
 
             tokens = music_tokens(candidate)
             uploader = candidate.get("uploader", "").casefold().strip()
-            score = len(tokens & seed_tokens) * 5
+            score = len(tokens & seed_tokens) * similarity_weight
             score += len(tokens & liked_tokens) * 3
             score -= len(tokens & disliked_tokens) * 4
             if seed_uploader and uploader == seed_uploader:
-                score += 7
+                score += 7 * (1 - int(diversity) / 125)
+            elif uploader:
+                score += int(diversity) / 25
             # Um pequeno bonus para duracoes tipicas de musica.
             if 120 <= duration <= 420:
                 score += 2

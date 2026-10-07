@@ -24,7 +24,7 @@ class RadioController:
             )
         self.radio_btn.configure(
             text="Radio ligada" if self.radio_enabled else "Radio TubeGrab",
-            fg_color=ACCENT if self.radio_enabled else "#242936",
+            fg_color=self.theme["accent"] if self.radio_enabled else self.theme["soft"],
         )
         state = "ligada" if self.radio_enabled else "desligada"
         self.set_status(f"Radio TubeGrab {state}.", OK if self.radio_enabled else MUTED)
@@ -45,7 +45,7 @@ class RadioController:
         if liked:
             self.set_status("Curtida salva. A radio vai aprender com essa escolha.", OK)
             self.like_btn.configure(fg_color="#26704d")
-            self.after(900, lambda: self.like_btn.configure(fg_color="#242936"))
+            self.after(900, lambda: self.like_btn.configure(fg_color=self.theme["soft"]))
             self._ensure_radio_queue(force=True)
             return
 
@@ -87,7 +87,16 @@ class RadioController:
             queries = self.radio.build_queries(seed)
             candidates = search_music_candidates(queries)
             existing_urls = {item.get("url") for item in self.playlist}
-            recommendations = self.radio.rank(seed, candidates, existing_urls, limit=6)
+            recommendations = self.radio.rank(
+                seed,
+                candidates,
+                existing_urls,
+                limit=self.settings.get("radio_batch_size"),
+                diversity=self.settings.get("radio_diversity"),
+                allow_lives=self.settings.get("allow_lives"),
+                allow_covers=self.settings.get("allow_covers"),
+                allow_remixes=self.settings.get("allow_remixes"),
+            )
             self.after(
                 0,
                 lambda: self._apply_radio_recommendations(
