@@ -84,7 +84,7 @@ def build_player_view(app, parent, soft: str):
     app.play_btn.pack(fill="x", padx=22)
     app.offline_btn = ctk.CTkButton(
         card,
-        text="Abrir playlist offline",
+        text="Abrir biblioteca offline",
         height=40,
         corner_radius=13,
         fg_color="transparent",

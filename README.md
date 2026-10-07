@@ -81,7 +81,7 @@ desktop precisem ser substituidos por componentes proprios do Android.
 - Controle de volume independente, sem alterar o volume geral do Windows.
 - Fila recolhivel: clique em qualquer musica para iniciar diretamente nela.
 - Controle de reproducao aleatoria integrado aos botoes do player.
-- Playlist offline: abra uma pasta baixada e reproduza os arquivos sem internet.
+- Biblioteca offline: abra uma playlist ou uma pasta raiz com varias playlists.
 - Radio TubeGrab: amplia a fila com recomendacoes escolhidas por um algoritmo local.
 - Botoes **Curtir** e **Pular** ensinam preferencias salvas somente no computador.
 - Interface rolavel para manter os controles acessiveis em telas com pouca altura.
@@ -182,8 +182,8 @@ A janela TubeGrab deve abrir.
    - Ajuste **VOL** para controlar somente o som do TubeGrab.
    - Use o botao de setas cruzadas para ativar ou desativar o modo aleatorio.
    - Clique em **Mostrar fila** e selecione qualquer faixa para toca-la.
-   - Para ouvir sem internet, clique em **Abrir playlist offline** e escolha a
-     pasta criada pelo download da playlist.
+   - Para ouvir sem internet, clique em **Abrir biblioteca offline**. Voce pode
+     escolher a pasta de uma playlist ou uma pasta raiz contendo varias delas.
    - Ative **Radio TubeGrab** para continuar ouvindo sugestoes depois da fila.
    - Use **Curtir** para reforcar escolhas parecidas ou **Pular** para rejeitar uma
      faixa e reduzir recomendacoes semelhantes.
@@ -200,6 +200,8 @@ A janela TubeGrab deve abrir.
 - Uma playlist baixada fica em `Downloads/Nome da playlist/` e seus arquivos sao
   numerados.
 - O player offline reconhece MP3, M4A, AAC, Opus, OGG, WAV, FLAC, MP4, WebM e MKV.
+- A busca offline percorre subpastas, agrupa os arquivos pelo caminho e respeita a
+  numeracao criada durante o download.
 - As preferencias da radio ficam em `TubeGrab/radio_preferences.json` na pasta de
   configuracoes do usuario. O arquivo guarda apenas URL, titulo e canal.
 

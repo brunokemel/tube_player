@@ -652,7 +652,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
     def open_offline_playlist(self):
         """Transforma os arquivos de uma pasta em uma fila local reproduzivel."""
         folder = ctk.filedialog.askdirectory(
-            title="Escolha a pasta da playlist",
+            title="Escolha uma playlist ou biblioteca de pastas",
             initialdir=self.output_dir.get() or downloads_dir(),
         )
         if not folder:
@@ -662,7 +662,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         if not tracks:
             messagebox.showwarning(
                 "Playlist vazia",
-                "Nenhum arquivo de audio ou video compativel foi encontrado nessa pasta.",
+                "Nenhum arquivo de audio ou video compativel foi encontrado nessa pasta ou nas subpastas.",
             )
             return
 
@@ -672,8 +672,15 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         self.playlist_index = 0
         self.stream_buffer.clear()
         self._populate_playlist()
-        self.log(f"Playlist offline carregada: {len(tracks)} faixa(s) de {folder}.")
-        self.set_status("Playlist offline pronta. Nenhuma conexao sera usada.", OK)
+        collections = {
+            Path(item["path"]).parent.relative_to(Path(folder))
+            for item in tracks
+        }
+        self.log(
+            f"Biblioteca offline carregada: {len(tracks)} faixa(s) em "
+            f"{len(collections)} pasta(s)."
+        )
+        self.set_status("Biblioteca offline pronta. Nenhuma conexao sera usada.", OK)
         self._start_current_track()
 
     def toggle_shuffle(self):

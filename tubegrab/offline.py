@@ -12,25 +12,36 @@ SUPPORTED_MEDIA = {
 
 
 def scan_offline_playlist(folder: str) -> list[Track]:
-    """Retorna os arquivos compativeis de uma pasta em ordem alfabetica."""
+    """Le uma pasta e suas subpastas, preservando uma ordem previsivel."""
+    root = Path(folder)
     files = sorted(
         (
             path
-            for path in Path(folder).iterdir()
+            for path in root.rglob("*")
             if path.is_file() and path.suffix.lower() in SUPPORTED_MEDIA
         ),
-        key=lambda path: path.name.casefold(),
+        # A ordenacao pelo caminho relativo agrupa cada album/playlist e depois
+        # respeita a numeracao criada pelo downloader (001, 002, 003...).
+        key=lambda path: str(path.relative_to(root)).casefold(),
     )
-    return [
-        Track(
-            url=path.resolve().as_uri(),
-            path=str(path),
-            title=path.stem,
-            uploader="Arquivo local",
-            duration=None,
-            thumbnail=None,
-            offline=True,
+
+    tracks = []
+    for path in files:
+        relative_parent = path.parent.relative_to(root)
+        collection = "" if relative_parent == Path(".") else str(relative_parent)
+        # O nome da colecao diferencia faixas de playlists distintas quando o
+        # usuario seleciona uma pasta raiz como Downloads.
+        display_title = f"{collection} / {path.stem}" if collection else path.stem
+        tracks.append(
+            Track(
+                url=path.resolve().as_uri(),
+                path=str(path),
+                title=display_title,
+                uploader=collection or "Arquivo local",
+                duration=None,
+                thumbnail=None,
+                offline=True,
+            )
         )
-        for path in files
-    ]
+    return tracks
 
