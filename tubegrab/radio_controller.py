@@ -1,6 +1,7 @@
 """Integracao entre o algoritmo de radio, a fila e os controles da interface."""
 
 import threading
+from tkinter import messagebox
 
 from .config import ACCENT, MUTED, OK, WARN
 from .downloader import search_music_candidates
@@ -11,6 +12,16 @@ class RadioController:
 
     def toggle_radio(self):
         self.radio_enabled = not self.radio_enabled
+        if self.radio_enabled:
+            messagebox.showinfo(
+                "Rádio TubeGrab em desenvolvimento",
+                "A Rádio TubeGrab ainda está em desenvolvimento.\n\n"
+                "As recomendações usam um algoritmo local que aprende com suas "
+                "curtidas e faixas puladas, mas ainda podem não ter a mesma precisão "
+                "de grandes aplicativos do mercado.\n\n"
+                "Seu feedback durante o uso ajudará a melhorar as próximas escolhas.\n\n"
+                "Envie sugestões para: br.kemel@gmail.com",
+            )
         self.radio_btn.configure(
             text="Radio ligada" if self.radio_enabled else "Radio TubeGrab",
             fg_color=ACCENT if self.radio_enabled else "#242936",

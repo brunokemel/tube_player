@@ -38,6 +38,7 @@ from .offline import scan_offline_playlist
 from .radio import RadioEngine
 from .radio_controller import RadioController
 from .stream_buffer import StreamBuffer
+from .ui.about_dialog import show_about_dialog
 from .ui.player_view import build_player_view
 from .utils import downloads_dir, format_duration, is_youtube_url
 
@@ -142,6 +143,17 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             font=ctk.CTkFont(size=12),
             text_color=MUTED,
         ).pack(anchor="w")
+        ctk.CTkButton(
+            header,
+            text="Sobre",
+            width=82,
+            height=38,
+            corner_radius=13,
+            fg_color="#191d27",
+            hover_color="#282e3a",
+            text_color=MUTED,
+            command=lambda: show_about_dialog(self),
+        ).pack(side="right")
 
         left = ctk.CTkFrame(root, fg_color="transparent")
         left.grid(row=1, column=0, sticky="nsew", padx=(32, 10), pady=(0, 28))

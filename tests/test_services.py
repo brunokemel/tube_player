@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tubegrab.offline import scan_offline_playlist
 from tubegrab.stream_buffer import StreamBuffer
+from tubegrab.ui.about_dialog import ABOUT_TEXT, _type_text
 
 
 class OfflinePlaylistTests(unittest.TestCase):
@@ -81,6 +82,28 @@ class StreamBufferTests(unittest.TestCase):
 
         self.assertEqual(result["stream_url"], "stream:two")
         self.assertEqual(calls, ["two"])
+
+
+class AboutAnimationTests(unittest.TestCase):
+    def test_typewriter_always_reaches_the_last_character(self):
+        class Window:
+            @staticmethod
+            def winfo_exists():
+                return True
+
+            @staticmethod
+            def after(_delay, callback):
+                callback()
+
+        class Label:
+            text = ""
+
+            def configure(self, **options):
+                self.text = options["text"]
+
+        label = Label()
+        _type_text(Window(), label)
+        self.assertEqual(label.text, ABOUT_TEXT)
 
 
 if __name__ == "__main__":

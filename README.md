@@ -84,6 +84,8 @@ desktop precisem ser substituidos por componentes proprios do Android.
 - Biblioteca offline: abra uma playlist ou uma pasta raiz com varias playlists.
 - Radio TubeGrab: amplia a fila com recomendacoes escolhidas por um algoritmo local.
 - Botoes **Curtir** e **Pular** ensinam preferencias salvas somente no computador.
+- Ao ativar a radio, o app informa que o algoritmo ainda esta em desenvolvimento e
+  pode nao ter a mesma precisao de recomendacao de grandes plataformas.
 - Interface rolavel para manter os controles acessiveis em telas com pouca altura.
 - Nenhum pacote visual pesado ou arquivo de imagem adicional e carregado.
 
@@ -215,6 +217,12 @@ A janela TubeGrab deve abrir.
 
 O YouTube fornece apenas os resultados das buscas montadas pela radio. A classificacao
 e o arquivo de aprendizado permanecem locais, sem exigir login ou enviar esse arquivo.
+
+Sugestoes para melhorar a Radio TubeGrab podem ser enviadas para
+`br.kemel@gmail.com`.
+
+O botao **Sobre** apresenta a autoria do projeto em uma janela animada e oferece
+atalhos para enviar sugestoes ou visitar [devkemel.com.br](https://devkemel.com.br).
 - Videos privados, removidos ou bloqueados sao ignorados pelo player, que tenta a
   proxima faixa.
 
