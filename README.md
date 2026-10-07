@@ -36,6 +36,7 @@ dividida no pacote `tubegrab`:
 
 - `app.py`: interface, fila de reproducao e tarefas em segundo plano.
 - `downloader.py`: metadados, URLs temporarias de stream e downloads.
+- `radio.py`: preferencias locais, consultas e pontuacao das recomendacoes.
 - `utils.py`: validacao de URL, pasta Downloads e formatacao de textos.
 - `config.py`: cores, titulo e tamanho inicial da janela.
 - `fetch_info()` usa `yt-dlp` apenas para ler metadados. Em playlists, a extracao e
@@ -45,6 +46,10 @@ dividida no pacote `tubegrab`:
   - Audio: melhor faixa de audio, convertida para MP3 192 kbps via FFmpeg.
 - O player resolve somente o stream da faixa atual. A proxima URL e buscada quando
   necessario, reduzindo memoria usada e evitando URLs expiradas.
+- Enquanto uma musica toca, as duas proximas URLs de stream sao preparadas em
+  segundo plano. O buffer guarda somente metadados por ate 30 minutos, nao o audio.
+- No modo aleatorio, o player prioriza uma das faixas que ja estejam no buffer.
+- A miniatura tambem e carregada somente para a faixa atual e descartada na troca.
 - `_progress_hook()` atualiza barra, porcentagem, velocidade e ETA.
 - A GUI so e alterada com `self.after(...)`, porque Tkinter nao e thread-safe.
 
@@ -66,6 +71,13 @@ desktop precisem ser substituidos por componentes proprios do Android.
 - Layout moderno em duas colunas: conteudo e exportacao de um lado, player e
   atividade do outro.
 - Cards arredondados, contraste suave e acoes principais em destaque.
+- Player com miniatura, barra de tempo arrastavel e indicador de duracao.
+- Controle de volume independente, sem alterar o volume geral do Windows.
+- Fila recolhivel: clique em qualquer musica para iniciar diretamente nela.
+- Controle de reproducao aleatoria integrado aos botoes do player.
+- Playlist offline: abra uma pasta baixada e reproduza os arquivos sem internet.
+- Radio TubeGrab: amplia a fila com recomendacoes escolhidas por um algoritmo local.
+- Botoes **Curtir** e **Pular** ensinam preferencias salvas somente no computador.
 - Interface rolavel para manter os controles acessiveis em telas com pouca altura.
 - Nenhum pacote visual pesado ou arquivo de imagem adicional e carregado.
 
@@ -160,6 +172,15 @@ A janela TubeGrab deve abrir.
 6. Em **Pasta de destino**, deixe Downloads ou clique em **Escolher**.
 7. Para ouvir sem baixar, clique em **Tocar**. Em playlists, use **Anterior** e
    **Proxima**; a troca tambem acontece automaticamente ao fim da faixa.
+   - Arraste a barra de tempo para escolher um trecho da musica.
+   - Ajuste **VOL** para controlar somente o som do TubeGrab.
+   - Use o botao de setas cruzadas para ativar ou desativar o modo aleatorio.
+   - Clique em **Mostrar fila** e selecione qualquer faixa para toca-la.
+   - Para ouvir sem internet, clique em **Abrir playlist offline** e escolha a
+     pasta criada pelo download da playlist.
+   - Ative **Radio TubeGrab** para continuar ouvindo sugestoes depois da fila.
+   - Use **Curtir** para reforcar escolhas parecidas ou **Pular** para rejeitar uma
+     faixa e reduzir recomendacoes semelhantes.
 8. Para salvar, clique em **Baixar**.
 9. Acompanhe a barra, a porcentagem, a velocidade e o log.
 10. Ao terminar, aparece um aviso com a pasta do arquivo.
@@ -172,6 +193,20 @@ A janela TubeGrab deve abrir.
 - Video sai em `.mp4`. Audio sai em `.mp3`.
 - Uma playlist baixada fica em `Downloads/Nome da playlist/` e seus arquivos sao
   numerados.
+- O player offline reconhece MP3, M4A, AAC, Opus, OGG, WAV, FLAC, MP4, WebM e MKV.
+- As preferencias da radio ficam em `TubeGrab/radio_preferences.json` na pasta de
+  configuracoes do usuario. O arquivo guarda apenas URL, titulo e canal.
+
+#### Como a Radio TubeGrab escolhe as musicas
+
+1. Usa titulo e canal da faixa atual para montar buscas musicais.
+2. Compara palavras relevantes dos candidatos com a faixa e as curtidas anteriores.
+3. Reduz a nota de caracteristicas presentes nas faixas rejeitadas.
+4. Favorece duracoes comuns de musica e remove repeticoes, Shorts e lives longas.
+5. Adiciona ate seis sugestoes por lote e prepara os proximos streams no buffer.
+
+O YouTube fornece apenas os resultados das buscas montadas pela radio. A classificacao
+e o arquivo de aprendizado permanecem locais, sem exigir login ou enviar esse arquivo.
 - Videos privados, removidos ou bloqueados sao ignorados pelo player, que tenta a
   proxima faixa.
 
@@ -195,8 +230,11 @@ TubeGrab/
   tubegrab/
     app.py                Interface e player
     downloader.py         YouTube, streams e downloads
+    radio.py              Algoritmo local de recomendacao
     utils.py              Funcoes auxiliares
     config.py             Configuracao visual
+  tests/
+    test_radio.py         Testes do ranqueamento e preferencias
   requirements.txt        Dependencias Python
   README.md               Este manual
 ```

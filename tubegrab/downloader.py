@@ -67,6 +67,7 @@ def get_playback_entries(url: str) -> list[dict]:
                     "title": entry.get("title") or "Faixa sem título",
                     "uploader": entry.get("uploader") or entry.get("channel") or "",
                     "duration": entry.get("duration"),
+                    "thumbnail": entry.get("thumbnail"),
                 }
             )
 
@@ -75,8 +76,8 @@ def get_playback_entries(url: str) -> list[dict]:
     return entries
 
 
-def get_audio_stream_url(url: str) -> str:
-    """Resolve a URL temporária do melhor stream de áudio de um vídeo."""
+def get_audio_stream_info(url: str) -> dict:
+    """Resolve o stream e os metadados completos da faixa atual."""
     if yt_dlp is None:
         raise RuntimeError("yt-dlp nao esta instalado.")
 
@@ -92,7 +93,51 @@ def get_audio_stream_url(url: str) -> str:
     stream_url = info.get("url")
     if not stream_url:
         raise RuntimeError("O YouTube não forneceu um stream de áudio.")
-    return stream_url
+    return {
+        "stream_url": stream_url,
+        "title": info.get("title"),
+        "duration": info.get("duration"),
+        "thumbnail": info.get("thumbnail"),
+    }
+
+
+def get_audio_stream_url(url: str) -> str:
+    """Mantém a API simples usada por integrações anteriores."""
+    return get_audio_stream_info(url)["stream_url"]
+
+
+def search_music_candidates(queries: list[str], results_per_query: int = 8) -> list[dict]:
+    """Busca candidatos; a decisao de recomendacao pertence ao modulo de radio."""
+    if yt_dlp is None:
+        raise RuntimeError("yt-dlp nao esta instalado.")
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extract_flat": "in_playlist",
+    }
+    candidates = []
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        for query in queries:
+            result = ydl.extract_info(
+                f"ytsearch{results_per_query}:{query}",
+                download=False,
+            )
+            for entry in result.get("entries") or []:
+                if not entry or not entry.get("id"):
+                    continue
+                candidates.append(
+                    {
+                        "url": f"https://www.youtube.com/watch?v={entry['id']}",
+                        "title": entry.get("title") or "Faixa sem titulo",
+                        "uploader": entry.get("uploader") or entry.get("channel") or "",
+                        "duration": entry.get("duration"),
+                        "thumbnail": entry.get("thumbnail"),
+                        "radio": True,
+                    }
+                )
+    return candidates
 
 
 def download_media(url: str, mode: str, quality: str, output_dir: str, progress_hook):
