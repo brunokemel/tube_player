@@ -34,9 +34,15 @@ A ideia e um app desktop simples, visual e direto:
 O ponto de entrada continua pequeno em `youtube_downloader.py`; a implementacao fica
 dividida no pacote `tubegrab`:
 
-- `app.py`: interface, fila de reproducao e tarefas em segundo plano.
+- `app.py`: janela principal e coordenacao dos componentes.
 - `downloader.py`: metadados, URLs temporarias de stream e downloads.
+- `download_controller.py`: validacao, progresso e integracao do download com a UI.
 - `radio.py`: preferencias locais, consultas e pontuacao das recomendacoes.
+- `radio_controller.py`: conecta a radio, a fila e os controles da janela.
+- `stream_buffer.py`: cache temporario e pre-carga das proximas faixas.
+- `offline.py`: descoberta e ordenacao de arquivos locais compativeis.
+- `models.py`: contrato compartilhado de uma faixa.
+- `ui/player_view.py`: construcao visual do card do player.
 - `utils.py`: validacao de URL, pasta Downloads e formatacao de textos.
 - `config.py`: cores, titulo e tamanho inicial da janela.
 - `fetch_info()` usa `yt-dlp` apenas para ler metadados. Em playlists, a extracao e
@@ -228,13 +234,21 @@ e o arquivo de aprendizado permanecem locais, sem exigir login ou enviar esse ar
 TubeGrab/
   youtube_downloader.py   Ponto de entrada
   tubegrab/
-    app.py                Interface e player
+    app.py                Janela e coordenacao dos componentes
+    download_controller.py Fluxo de busca e download
     downloader.py         YouTube, streams e downloads
+    models.py             Contrato compartilhado de faixa
+    offline.py            Descoberta de playlists locais
     radio.py              Algoritmo local de recomendacao
+    radio_controller.py   Integracao da radio com o player
+    stream_buffer.py      Cache e pre-carregamento
+    ui/
+      player_view.py      Interface visual do player
     utils.py              Funcoes auxiliares
     config.py             Configuracao visual
   tests/
     test_radio.py         Testes do ranqueamento e preferencias
+    test_services.py      Testes de offline e buffer
   requirements.txt        Dependencias Python
   README.md               Este manual
 ```

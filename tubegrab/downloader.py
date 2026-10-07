@@ -7,6 +7,8 @@ metadados e a conversão do arquivo para manter a interface gráfica mais limpa.
 import os
 from urllib.parse import parse_qs, urlparse
 
+from .models import Track
+
 try:
     import yt_dlp
 except ImportError:  # pragma: no cover - depende do ambiente do usuário.
@@ -38,7 +40,7 @@ def get_video_info(url: str):
     return info
 
 
-def get_playback_entries(url: str) -> list[dict]:
+def get_playback_entries(url: str) -> list[Track]:
     """Cria uma fila leve com os itens reproduzíveis da URL informada."""
     info = get_video_info(url)
     if info.get("_type") == "playlist":
@@ -62,13 +64,13 @@ def get_playback_entries(url: str) -> list[dict]:
 
         if webpage_url:
             entries.append(
-                {
-                    "url": webpage_url,
-                    "title": entry.get("title") or "Faixa sem título",
-                    "uploader": entry.get("uploader") or entry.get("channel") or "",
-                    "duration": entry.get("duration"),
-                    "thumbnail": entry.get("thumbnail"),
-                }
+                Track(
+                    url=webpage_url,
+                    title=entry.get("title") or "Faixa sem título",
+                    uploader=entry.get("uploader") or entry.get("channel") or "",
+                    duration=entry.get("duration"),
+                    thumbnail=entry.get("thumbnail"),
+                )
             )
 
     if not entries:

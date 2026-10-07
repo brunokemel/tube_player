@@ -6,4 +6,9 @@ projeto mais organizado e fácil de manter.
 
 __all__ = ["main"]
 
-from .app import main
+
+def main():
+    """Importa a interface somente quando o aplicativo realmente for iniciado."""
+    from .app import main as run_app
+
+    run_app()
