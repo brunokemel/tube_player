@@ -91,6 +91,9 @@ desktop precisem ser substituidos por componentes proprios do Android.
 - Interface rolavel para manter os controles acessiveis em telas com pouca altura.
 - Nenhum pacote visual pesado ou arquivo de imagem adicional e carregado.
 - Seletor no cabecalho com os temas **Azul moderno** e **Vidro neon**.
+- Logo oficial no cabecalho, na barra lateral e no icone da janela.
+- Icone proprio no executavel e nos atalhos criados na Area de Trabalho.
+- Tela de abertura com marca e progresso enquanto a interface e preparada.
 - A preferencia visual e salva e restaurada automaticamente na proxima execucao.
 - A troca de tema reconstroi somente os widgets, preservando player e fila atuais.
 
@@ -186,6 +189,45 @@ python youtube_downloader.py
 ```
 
 A janela TubeGrab deve abrir.
+
+### Distribuir no Windows como um unico EXE
+
+Para o usuario final, a opcao mais simples e baixar apenas
+`TubeGrab-Portable.exe`. Ele ja inclui Python, VLC e FFmpeg e, portanto, nao exige
+essas instalacoes na maquina em que sera executado.
+
+Na maquina usada para gerar uma nova versao:
+
+1. Instale as dependencias de desenvolvimento:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+```
+
+2. Tenha o VLC e o FFmpeg instalados e execute:
+
+```powershell
+.\build_windows_onefile.ps1 -FfmpegPath "C:\caminho\para\ffmpeg.exe"
+```
+
+O arquivo pronto sera criado em `download\TubeGrab-Portable.exe`. Basta publicar esse
+unico arquivo para download; o usuario pode salva-lo em qualquer pasta e abrir com
+dois cliques. Na primeira abertura ele pode levar alguns segundos a mais, pois os
+componentes internos sao extraidos para uma pasta temporaria.
+
+Como o executavel ainda nao possui assinatura digital, o Windows SmartScreen pode
+mostrar um aviso de editor desconhecido. Para uma distribuicao publica sem esse
+alerta recorrente, o proximo passo e assinar o EXE com um certificado de assinatura
+de codigo. O codigo-fonte e o build continuam iguais.
+
+Tambem existe uma versao em pasta, que abre mais rapidamente:
+
+```powershell
+.\build_windows.ps1 -FfmpegPath "C:\caminho\para\ffmpeg.exe"
+```
+
+Nesse formato, distribua a pasta `dist\TubeGrab` completa, e nao apenas o EXE que
+existe dentro dela.
 
 ### 5. Como usar
 
@@ -285,6 +327,10 @@ TubeGrab/
     test_themes.py        Testes das paletas e persistencia
     test_settings.py      Testes das preferencias gerais
   requirements.txt        Dependencias Python
+  requirements-dev.txt    Dependencias usadas somente para gerar a distribuicao
+  TubeGrab-onefile.spec   Receita do executavel unico para Windows
+  build_windows_onefile.ps1 Script de build do executavel unico
+  download/               Executavel unico pronto para distribuicao
   README.md               Este manual
 ```
 

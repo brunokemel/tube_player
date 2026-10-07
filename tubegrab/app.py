@@ -11,8 +11,12 @@ from io import BytesIO
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from .runtime import bundled_resource, configure_bundled_binaries
+
+configure_bundled_binaries()
+
 import vlc
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageTk
 
 import customtkinter as ctk
 from tkinter import messagebox
@@ -59,6 +63,10 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         self.geometry(WINDOW_SIZE)
         self.minsize(900, 620)
         self.configure(fg_color=self.theme["bg"])
+        self._load_brand_assets()
+        # A janela principal fica oculta ate todos os cards estarem construidos.
+        self.withdraw()
+        self._show_splash()
 
         # Estado da aplicação e controles da interface.
         self.info = None
@@ -98,11 +106,97 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         self.radio_loading_generation = None
         self.radio_skip_pending = False
 
+        self._set_splash_progress(0.35, "Montando a interface...")
         self._build()
-        self.after(80, self._center)
+        self._set_splash_progress(0.82, "Preparando player e biblioteca...")
+        self.after(450, self._finish_startup)
         self.after(500, self._refresh_player_progress)
         self.after(350, self._load_startup_library)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _load_brand_assets(self):
+        """Prepara a marca em tamanhos leves sem manter copias grandes na interface."""
+        logo_path = bundled_resource("tubegrab", "logo", "logo_app.png")
+        with Image.open(logo_path) as source:
+            logo = source.convert("RGBA")
+            # A arte possui proporcao 3:1; o primeiro terco contem o simbolo.
+            icon_size = min(logo.height, logo.width // 3)
+            icon = logo.crop((0, 0, icon_size, icon_size))
+
+            self.brand_logo_image = ctk.CTkImage(
+                light_image=logo.copy(), dark_image=logo.copy(), size=(210, 70)
+            )
+            self.brand_icon_image = ctk.CTkImage(
+                light_image=icon.copy(), dark_image=icon.copy(), size=(36, 36)
+            )
+
+            # O Tk precisa manter uma referencia viva para exibir o icone da janela.
+            window_icon = icon.resize((64, 64), Image.Resampling.LANCZOS)
+            self.window_icon_image = ImageTk.PhotoImage(window_icon)
+            self.iconphoto(True, self.window_icon_image)
+
+    def _show_splash(self):
+        """Exibe uma abertura compacta enquanto a interface termina de carregar."""
+        self.splash = ctk.CTkToplevel(self)
+        self.splash.overrideredirect(True)
+        self.splash.attributes("-topmost", True)
+        self.splash.configure(fg_color=self.theme["bg"])
+
+        width, height = 470, 270
+        x = (self.winfo_screenwidth() - width) // 2
+        y = (self.winfo_screenheight() - height) // 2
+        self.splash.geometry(f"{width}x{height}+{x}+{y}")
+
+        card = ctk.CTkFrame(
+            self.splash,
+            fg_color=self.theme["surface"],
+            corner_radius=24,
+            border_width=1,
+            border_color=self.theme["border"],
+        )
+        card.pack(fill="both", expand=True, padx=10, pady=10)
+        ctk.CTkLabel(card, text="", image=self.brand_logo_image).pack(pady=(34, 4))
+        ctk.CTkLabel(
+            card,
+            text="Seu player e downloader, sem complicacao.",
+            text_color=self.theme["muted"],
+            font=ctk.CTkFont(size=12),
+        ).pack()
+        self.splash_status = ctk.CTkLabel(
+            card,
+            text="Iniciando TubeGrab...",
+            text_color=self.theme["text"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+        )
+        self.splash_status.pack(pady=(24, 8))
+        self.splash_progress = ctk.CTkProgressBar(
+            card,
+            width=330,
+            height=7,
+            corner_radius=4,
+            fg_color=self.theme["field"],
+            progress_color=self.theme["accent"],
+        )
+        self.splash_progress.pack()
+        self.splash_progress.set(0.12)
+        # Forca apenas o desenho da abertura; nenhum trabalho de rede ocorre aqui.
+        self.splash.update_idletasks()
+        self.splash.update()
+
+    def _set_splash_progress(self, value, message):
+        """Atualiza a abertura sem criar uma thread adicional no Tkinter."""
+        if self.splash.winfo_exists():
+            self.splash_progress.set(value)
+            self.splash_status.configure(text=message)
+            self.splash.update_idletasks()
+
+    def _finish_startup(self):
+        """Troca a abertura pela janela principal ja completamente renderizada."""
+        self._set_splash_progress(1.0, "Tudo pronto!")
+        self._center()
+        self.deiconify()
+        self.lift()
+        self.after(120, self.splash.destroy)
 
     def _center(self):
         """Centraliza a janela na tela ao abrir o app."""
@@ -158,9 +252,8 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         heading.pack(side="left")
         ctk.CTkLabel(
             heading,
-            text="TubeGrab",
-            font=ctk.CTkFont(family="Segoe UI", size=27, weight="bold"),
-            text_color=TEXT,
+            text="",
+            image=self.brand_logo_image,
         ).pack(anchor="w")
         ctk.CTkLabel(
             heading,

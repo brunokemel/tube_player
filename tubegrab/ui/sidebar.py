@@ -21,13 +21,10 @@ def build_sidebar(app, parent):
     brand.pack(fill="x", padx=12 if compact else 18, pady=(20, 22 if compact else 28))
     ctk.CTkLabel(
         brand,
-        text="▶",
-        width=30,
-        height=30,
-        corner_radius=9,
-        fg_color=theme["accent"],
-        text_color="#ffffff",
-        font=ctk.CTkFont(size=11, weight="bold"),
+        text="",
+        image=app.brand_icon_image,
+        width=36,
+        height=36,
     ).pack(side="left")
     ctk.CTkLabel(
         brand,
