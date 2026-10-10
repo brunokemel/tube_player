@@ -63,7 +63,11 @@ class TubeGrab(DownloadController, RadioController, QMainWindow):
         self._load_brand_assets()
 
         self.info = None
+        self.info_url = None
         self.busy = False
+        self.download_active = False
+        self.metadata_active = False
+        self.metadata_generation = 0
         self.output_dir = Value(self.settings.get("download_folder"))
         self.mode = Value(self.settings.get("default_mode"))
         self.quality = Value(self.settings.get("default_quality"))
@@ -181,6 +185,7 @@ class TubeGrab(DownloadController, RadioController, QMainWindow):
         row = QHBoxLayout()
         self.url_entry = Entry(self.url_var)
         self.url_entry.setPlaceholderText("youtube.com/watch?v=...")
+        self.url_entry.textEdited.connect(self._on_url_changed)
         self.url_entry.returnPressed.connect(self.fetch_info)
         self.fetch_btn = Button("Buscar")
         self.fetch_btn.setObjectName("primary")
@@ -561,6 +566,16 @@ class TubeGrab(DownloadController, RadioController, QMainWindow):
         self.mode.set("audio" if value == "Audio MP3" else "video")
         self.quality_menu.configure(state="disabled" if value == "Audio MP3" else "normal")
 
+    def _on_url_changed(self, text):
+        """Descarta metadados e respostas pendentes pertencentes ao link anterior."""
+        self.metadata_generation += 1
+        self.metadata_active = False
+        self.info = None
+        self.info_url = None
+        self.title_label.configure(text="Nenhum vídeo carregado")
+        self.meta_label.configure(text="Use Buscar para conferir o novo link")
+        self.set_metadata_busy(False)
+
     def pick_folder(self):
         path = QFileDialog.getExistingDirectory(self, "Pasta de destino", self.output_dir.get() or downloads_dir())
         if path:
@@ -584,9 +599,19 @@ class TubeGrab(DownloadController, RadioController, QMainWindow):
         self.busy = busy
         def update():
             state = "disabled" if busy else "normal"
-            for widget in (self.fetch_btn, self.download_btn, self.url_entry, self.mode_seg):
+            for widget in (self.fetch_btn, self.download_btn, self.mode_seg):
                 widget.configure(state=state)
             self.quality_menu.configure(state="disabled" if busy or self.mode.get() == "audio" else "normal")
+        self.after(0, update)
+
+    def set_metadata_busy(self, busy):
+        """Bloqueia somente a busca; o campo continua pronto para receber outro link."""
+        def update():
+            self.fetch_btn.configure(
+                state="disabled" if busy or self.download_active else "normal"
+            )
+            if not self.download_active:
+                self.download_btn.configure(state="normal")
         self.after(0, update)
 
     def _load_queue(self, url: str, load_generation: int):

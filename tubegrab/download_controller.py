@@ -16,7 +16,8 @@ class DownloadController:
     """Mixin que conecta validacao, yt-dlp e progresso aos controles da UI."""
 
     def fetch_info(self):
-        if self.busy:
+        if getattr(self, "download_active", False):
+            self.set_status("Aguarde o download atual terminar para consultar outro link.", WARN)
             return
         try:
             import yt_dlp  # noqa: F401
@@ -30,15 +31,23 @@ class DownloadController:
         if not is_youtube_url(url):
             messagebox.showwarning("Link invalido", "Isso nao parece um link do YouTube.")
             return
-        self.set_busy(True)
+        self.metadata_generation = getattr(self, "metadata_generation", 0) + 1
+        generation = self.metadata_generation
+        self.metadata_active = True
+        self.set_metadata_busy(True)
         self.set_status("Buscando informacoes do video...", WARN)
         self.log(f"Consultando: {url}")
-        threading.Thread(target=self._fetch_worker, args=(url,), daemon=True).start()
+        threading.Thread(
+            target=self._fetch_worker,
+            args=(url, generation),
+            daemon=True,
+        ).start()
 
-    def _fetch_worker(self, url: str):
+    def _fetch_worker(self, url: str, generation: int):
         try:
             info = get_video_info(url)
-            self.info = info
+            if not self._metadata_request_is_current(url, generation):
+                return
             is_playlist = info.get("_type") == "playlist"
             entries = [entry for entry in (info.get("entries") or []) if entry]
             title = info.get("title") or "Sem titulo"
@@ -47,6 +56,10 @@ class DownloadController:
             views = format_views(info.get("view_count"))
 
             def update_ui():
+                if not self._metadata_request_is_current(url, generation):
+                    return
+                self.info = info
+                self.info_url = url
                 self.title_label.configure(text=title)
                 if is_playlist:
                     self.meta_label.configure(
@@ -59,18 +72,37 @@ class DownloadController:
 
             self.after(0, update_ui)
             kind = "Playlist" if is_playlist else "Video"
-            self.set_status(f"{kind} encontrado. Você pode tocar ou baixar.", OK)
-            self.log(f"OK: {title}")
+            if self._metadata_request_is_current(url, generation):
+                self.set_status(f"{kind} encontrado. Você pode tocar ou baixar.", OK)
+                self.log(f"OK: {title}")
         except Exception as exc:
-            self.info = None
-            self.set_status("Nao foi possivel obter o video.", ACCENT)
-            self.log(f"Erro: {exc}")
-            self.after(0, lambda: messagebox.showerror("Erro", f"Falha ao buscar o video:\n{exc}"))
+            if self._metadata_request_is_current(url, generation):
+                self.info = None
+                self.info_url = None
+                self.set_status("Nao foi possivel obter o video.", ACCENT)
+                self.log(f"Erro: {exc}")
+                error = str(exc)
+                self.after(
+                    0,
+                    lambda detail=error: messagebox.showerror(
+                        "Erro", f"Falha ao buscar o video:\n{detail}"
+                    ),
+                )
         finally:
-            self.set_busy(False)
+            if generation == getattr(self, "metadata_generation", 0):
+                self.metadata_active = False
+                self.set_metadata_busy(False)
+
+    def _metadata_request_is_current(self, url: str, generation: int) -> bool:
+        """Impede uma busca antiga de sobrescrever o link que está no campo."""
+        return (
+            generation == getattr(self, "metadata_generation", 0)
+            and url == self.url_var.get().strip()
+        )
 
     def start_download(self):
-        if self.busy:
+        if getattr(self, "download_active", False):
+            self.set_status("Já existe um download em andamento.", WARN)
             return
         try:
             import yt_dlp  # noqa: F401
@@ -87,11 +119,23 @@ class DownloadController:
 
         dest = self.output_dir.get().strip() or downloads_dir()
         Path(dest).mkdir(parents=True, exist_ok=True)
+        # O download recebe uma fotografia imutável das escolhas atuais. Uma busca
+        # anterior é invalidada para nunca publicar dados sobre outro link.
+        self.metadata_generation = getattr(self, "metadata_generation", 0) + 1
+        self.metadata_active = False
+        self.set_metadata_busy(False)
+        mode = self.mode.get()
+        quality = self.quality.get()
+        self.download_active = True
         self.set_busy(True)
         self.progress.set(0)
         self.set_status("Iniciando download...", WARN)
         self.log("Download iniciado.")
-        threading.Thread(target=self._download_worker, args=(url, dest), daemon=True).start()
+        threading.Thread(
+            target=self._download_worker,
+            args=(url, dest, mode, quality),
+            daemon=True,
+        ).start()
 
     def _progress_hook(self, data: dict):
         status = data.get("status")
@@ -118,13 +162,12 @@ class DownloadController:
             self.set_status("Processando arquivo...", WARN)
             self.log(f"Arquivo baixado: {filename}")
 
-    def _download_worker(self, url: str, dest: str):
-        audio = self.mode.get() == "audio"
-        quality = self.quality.get()
+    def _download_worker(self, url: str, dest: str, mode: str, quality: str):
+        audio = mode == "audio"
         try:
             download_media(
                 url,
-                self.mode.get(),
+                mode,
                 quality,
                 dest,
                 self._progress_hook,
@@ -142,8 +185,15 @@ class DownloadController:
         except Exception as exc:
             self.set_status("Falha no download.", ACCENT)
             self.log(f"Erro: {exc}")
-            self.after(0, lambda: messagebox.showerror("Erro", f"Falha no download:\n{exc}"))
+            error = str(exc)
+            self.after(
+                0,
+                lambda detail=error: messagebox.showerror(
+                    "Erro", f"Falha no download:\n{detail}"
+                ),
+            )
         finally:
+            self.download_active = False
             self.set_busy(False)
 
     @staticmethod
