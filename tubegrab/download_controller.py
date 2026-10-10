@@ -5,7 +5,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from tkinter import messagebox
+from .ui.dialogs import messagebox
 
 from .config import ACCENT, OK, WARN
 from .downloader import download_media, get_video_info

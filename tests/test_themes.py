@@ -10,6 +10,7 @@ class ThemeTests(unittest.TestCase):
         required = {
             "bg", "card", "surface", "field", "soft", "border",
             "player_bg", "player_border", "accent", "accent_hover", "text", "muted",
+            "ok", "warn", "like", "dislike", "on_accent",
         }
         for palette in THEMES.values():
             self.assertTrue(required.issubset(palette))

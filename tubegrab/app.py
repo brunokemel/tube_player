@@ -1,8 +1,4 @@
-"""Interface gráfica principal do TubeGrab.
-
-A janela é construída aqui. O código da UI fica separado da lógica de download e dos
-utilitários, deixando a aplicação mais fácil de ler e evoluir.
-"""
+"""Interface desktop moderna do TubeGrab, construída com PySide6."""
 
 import random
 import threading
@@ -16,27 +12,17 @@ from .runtime import bundled_resource, configure_bundled_binaries
 configure_bundled_binaries()
 
 import vlc
-from PIL import Image, ImageOps, ImageTk
-
-import customtkinter as ctk
-from tkinter import messagebox
-
-from .config import (
-    ACCENT,
-    ACCENT_HOVER,
-    APP_TITLE,
-    BG,
-    CARD,
-    MUTED,
-    OK,
-    TEXT,
-    WARN,
-    WINDOW_SIZE,
+from PIL import Image, ImageOps
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QImage, QPixmap
+from PySide6.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton,
+    QScrollArea, QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
-from .downloader import (
-    get_audio_stream_info,
-    get_playback_entries,
-)
+
+from .config import ACCENT, MUTED, OK, WARN
+from .downloader import get_audio_stream_info, get_playback_entries
 from .download_controller import DownloadController
 from .offline import scan_offline_playlist
 from .radio import RadioEngine
@@ -44,14 +30,25 @@ from .radio_controller import RadioController
 from .settings import Settings
 from .stream_buffer import StreamBuffer
 from .themes import DEFAULT_THEME, THEMES
-from .ui.about_dialog import show_about_dialog
-from .ui.player_view import build_player_view
-from .ui.settings_dialog import show_settings_dialog
-from .ui.sidebar import build_sidebar
+from .ui.about_dialog import ABOUT_TEXT
+from .ui.dialogs import messagebox
+from .ui.qt_widgets import Button, Combo, Entry, Label, LogBox, Progress, Slider, Value
 from .utils import downloads_dir, format_duration, is_youtube_url
 
 
-class TubeGrab(DownloadController, RadioController, ctk.CTk):
+class _Dispatcher(QObject):
+    requested = Signal(object, int)
+
+    def __init__(self):
+        super().__init__()
+        self.requested.connect(self._schedule)
+
+    @staticmethod
+    def _schedule(callback, delay):
+        QTimer.singleShot(delay, callback)
+
+
+class TubeGrab(DownloadController, RadioController, QMainWindow):
     def __init__(self):
         super().__init__()
         self.settings = Settings()
@@ -59,28 +56,21 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         if self.theme_name not in THEMES:
             self.theme_name = DEFAULT_THEME
         self.theme = THEMES[self.theme_name]
-        self.title(APP_TITLE)
-        self.geometry(WINDOW_SIZE)
-        self.minsize(900, 620)
-        self.configure(fg_color=self.theme["bg"])
+        self._dispatcher = _Dispatcher()
+        self.setWindowTitle("TubeGrab")
+        self.resize(1220, 780)
+        self.setMinimumSize(980, 650)
         self._load_brand_assets()
-        # A janela principal fica oculta ate todos os cards estarem construidos.
-        self.withdraw()
-        self._show_splash()
 
-        # Estado da aplicação e controles da interface.
         self.info = None
         self.busy = False
-        self.output_dir = ctk.StringVar(value=self.settings.get("download_folder"))
-        self.mode = ctk.StringVar(value=self.settings.get("default_mode"))
-        self.quality = ctk.StringVar(value=self.settings.get("default_quality"))
+        self.output_dir = Value(self.settings.get("download_folder"))
+        self.mode = Value(self.settings.get("default_mode"))
+        self.quality = Value(self.settings.get("default_quality"))
         remembered_url = self.settings.get("last_url") if self.settings.get("remember_playback") else ""
-        self.url_var = ctk.StringVar(value=remembered_url)
-        self.status_var = ctk.StringVar(value="Cole o link do YouTube para comecar")
+        self.url_var = Value(remembered_url)
+        self.status_var = Value("Cole o link do YouTube para começar")
         self.progress_value = 0.0
-
-        # A fila guarda somente dados pequenos. Cada stream é resolvido apenas
-        # quando chega sua vez, evitando consumo desnecessário em máquinas simples.
         self.playlist = []
         self.playlist_index = -1
         self.playback_generation = 0
@@ -90,560 +80,514 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         self.user_seeking = False
         self.thumbnail_image = None
         self.player_volume = self.settings.get("default_volume")
-
-        # O buffer guarda apenas URLs e metadados das proximas faixas, nunca o
-        # arquivo de audio. Um lock protege o cache entre as threads do player.
         self.stream_buffer = StreamBuffer()
         self.queue_generation = 0
-        self.pending_resume_ms = (
-            self.settings.get("last_position_ms")
-            if self.settings.get("remember_playback")
-            else 0
-        )
+        self.pending_resume_ms = self.settings.get("last_position_ms") if self.settings.get("remember_playback") else 0
         self.radio = RadioEngine()
         self.radio_enabled = False
         self.radio_loading = False
         self.radio_loading_generation = None
         self.radio_skip_pending = False
 
-        self._set_splash_progress(0.35, "Montando a interface...")
         self._build()
-        self._set_splash_progress(0.82, "Preparando player e biblioteca...")
-        self.after(450, self._finish_startup)
+        self._apply_theme()
         self.after(500, self._refresh_player_progress)
         self.after(350, self._load_startup_library)
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def after(self, delay, callback):
+        self._dispatcher.requested.emit(callback, int(delay))
 
     def _load_brand_assets(self):
-        """Prepara a marca em tamanhos leves sem manter copias grandes na interface."""
-        logo_path = bundled_resource("tubegrab", "logo", "logo_app.png")
-        with Image.open(logo_path) as source:
-            logo = source.convert("RGBA")
-            # A arte possui proporcao 3:1; o primeiro terco contem o simbolo.
-            icon_size = min(logo.height, logo.width // 3)
-            icon = logo.crop((0, 0, icon_size, icon_size))
-
-            self.brand_logo_image = ctk.CTkImage(
-                light_image=logo.copy(), dark_image=logo.copy(), size=(210, 70)
-            )
-            self.brand_icon_image = ctk.CTkImage(
-                light_image=icon.copy(), dark_image=icon.copy(), size=(36, 36)
-            )
-
-            # O Tk precisa manter uma referencia viva para exibir o icone da janela.
-            window_icon = icon.resize((64, 64), Image.Resampling.LANCZOS)
-            self.window_icon_image = ImageTk.PhotoImage(window_icon)
-            self.iconphoto(True, self.window_icon_image)
-
-    def _show_splash(self):
-        """Exibe uma abertura compacta enquanto a interface termina de carregar."""
-        self.splash = ctk.CTkToplevel(self)
-        self.splash.overrideredirect(True)
-        self.splash.attributes("-topmost", True)
-        self.splash.configure(fg_color=self.theme["bg"])
-
-        width, height = 470, 270
-        x = (self.winfo_screenwidth() - width) // 2
-        y = (self.winfo_screenheight() - height) // 2
-        self.splash.geometry(f"{width}x{height}+{x}+{y}")
-
-        card = ctk.CTkFrame(
-            self.splash,
-            fg_color=self.theme["surface"],
-            corner_radius=24,
-            border_width=1,
-            border_color=self.theme["border"],
-        )
-        card.pack(fill="both", expand=True, padx=10, pady=10)
-        ctk.CTkLabel(card, text="", image=self.brand_logo_image).pack(pady=(34, 4))
-        ctk.CTkLabel(
-            card,
-            text="Seu player e downloader, sem complicacao.",
-            text_color=self.theme["muted"],
-            font=ctk.CTkFont(size=12),
-        ).pack()
-        self.splash_status = ctk.CTkLabel(
-            card,
-            text="Iniciando TubeGrab...",
-            text_color=self.theme["text"],
-            font=ctk.CTkFont(size=11, weight="bold"),
-        )
-        self.splash_status.pack(pady=(24, 8))
-        self.splash_progress = ctk.CTkProgressBar(
-            card,
-            width=330,
-            height=7,
-            corner_radius=4,
-            fg_color=self.theme["field"],
-            progress_color=self.theme["accent"],
-        )
-        self.splash_progress.pack()
-        self.splash_progress.set(0.12)
-        # Forca apenas o desenho da abertura; nenhum trabalho de rede ocorre aqui.
-        self.splash.update_idletasks()
-        self.splash.update()
-
-    def _set_splash_progress(self, value, message):
-        """Atualiza a abertura sem criar uma thread adicional no Tkinter."""
-        if self.splash.winfo_exists():
-            self.splash_progress.set(value)
-            self.splash_status.configure(text=message)
-            self.splash.update_idletasks()
-
-    def _finish_startup(self):
-        """Troca a abertura pela janela principal ja completamente renderizada."""
-        self._set_splash_progress(1.0, "Tudo pronto!")
-        self._center()
-        self.deiconify()
-        self.lift()
-        self.after(120, self.splash.destroy)
-
-    def _center(self):
-        """Centraliza a janela na tela ao abrir o app."""
-        self.update_idletasks()
-        # Limita o tamanho inicial para caber tambem em telas menores.
-        w = min(1060, self.winfo_screenwidth() - 60)
-        h = min(720, self.winfo_screenheight() - 80)
-        x = (self.winfo_screenwidth() - w) // 2
-        y = (self.winfo_screenheight() - h) // 2
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        logo = bundled_resource("tubegrab", "logo", "logo_app.png")
+        self.setWindowIcon(QIcon(str(logo)))
+        self.logo_pixmap = QPixmap(str(logo))
 
     def _build(self):
-        """Monta a interface em duas colunas, com hierarquia visual mais leve."""
-        # Nomes locais permitem que toda a arvore visual use a paleta ativa sem
-        # acoplar os servicos de player/download ao sistema de temas.
-        BG = self.theme["bg"]
-        CARD = self.theme["card"]
-        ACCENT = self.theme["accent"]
-        ACCENT_HOVER = self.theme["accent_hover"]
-        TEXT = self.theme["text"]
-        MUTED = self.theme["muted"]
-        surface = self.theme["surface"]
-        field = self.theme["field"]
-        soft = self.theme["soft"]
-        page_padding = 18 if self.settings.get("compact_mode") else 32
+        root = QWidget()
+        self.setCentralWidget(root)
+        shell = QHBoxLayout(root)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
 
-        # A barra lateral permanece fixa enquanto o conteudo central pode rolar.
-        shell = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
-        shell.pack(fill="both", expand=True)
-        self.shell = shell
-        build_sidebar(self, shell)
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(190)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(20, 26, 20, 20)
+        brand = QLabel()
+        brand.setPixmap(self.logo_pixmap.scaled(142, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        side.addWidget(brand)
+        tagline = QLabel("PLAYER + DOWNLOAD")
+        tagline.setObjectName("eyebrow")
+        side.addWidget(tagline)
+        side.addSpacing(24)
+        self.nav_buttons = {}
+        for text, section in (("Início", "inicio"), ("Downloads", "downloads"), ("Biblioteca", "biblioteca"), ("Ajustes", "configuracoes")):
+            button = QPushButton(text)
+            button.setObjectName("nav")
+            button.setCheckable(True)
+            button.setChecked(section == "inicio")
+            button.clicked.connect(lambda _checked=False, target=section: self.navigate_to(target))
+            side.addWidget(button)
+            self.nav_buttons[section] = button
+        side.addStretch()
+        footer = QLabel("OFFLINE FIRST\nIndependente e gratuito")
+        footer.setObjectName("sideFooter")
+        side.addWidget(footer)
+        shell.addWidget(sidebar)
 
-        # O scroll mantem todo o conteudo acessivel em telas com pouca altura.
-        root = ctk.CTkScrollableFrame(
-            shell,
-            fg_color=BG,
-            corner_radius=0,
-            scrollbar_button_color=soft,
-            scrollbar_button_hover_color=self.theme["border"],
-        )
-        root.pack(side="right", fill="both", expand=True)
-        self.content_scroll = root
-        root.grid_columnconfigure(0, weight=3, uniform="content")
-        root.grid_columnconfigure(1, weight=2, uniform="content")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.content_scroll = scroll
+        content = QWidget()
+        scroll.setWidget(content)
+        page = QVBoxLayout(content)
+        page.setContentsMargins(30, 24, 30, 28)
+        page.setSpacing(16)
 
-        # Cabecalho compacto; a marca principal agora vive na barra lateral.
-        header = ctk.CTkFrame(root, fg_color="transparent")
-        header.grid(
-            row=0, column=0, columnspan=2, sticky="ew",
-            padx=page_padding, pady=(18 if page_padding == 18 else 26, 18),
-        )
-        heading = ctk.CTkFrame(header, fg_color="transparent")
-        heading.pack(side="left")
-        ctk.CTkLabel(
-            heading,
-            text="",
-            image=self.brand_logo_image,
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            heading,
-            text="Seu player e downloader, sem complicacao.",
-            font=ctk.CTkFont(size=12),
-            text_color=MUTED,
-        ).pack(anchor="w")
-        ctk.CTkButton(
-            header,
-            text="Sobre",
-            width=82,
-            height=38,
-            corner_radius=13,
-            fg_color=field,
-            hover_color=self.theme["border"],
-            text_color=MUTED,
-            command=lambda: show_about_dialog(self),
-        ).pack(side="right")
-        self.theme_selector = ctk.CTkOptionMenu(
-            header,
-            variable=ctk.StringVar(value=self.theme_name),
-            values=list(THEMES),
-            width=145,
-            height=38,
-            corner_radius=13,
-            fg_color=field,
-            button_color=soft,
-            button_hover_color=self.theme["border"],
-            dropdown_fg_color=CARD,
-            command=self.change_theme,
-        )
-        self.theme_selector.pack(side="right", padx=(0, 8))
+        header = QHBoxLayout()
+        heading = QVBoxLayout()
+        eyebrow = QLabel("ESTÚDIO")
+        eyebrow.setObjectName("eyebrow")
+        title = QLabel("Cole o link. Toque. Baixe.")
+        title.setObjectName("pageTitle")
+        subtitle = QLabel("Fila, rádio e biblioteca no mesmo deck.")
+        subtitle.setObjectName("muted")
+        heading.addWidget(eyebrow)
+        heading.addWidget(title)
+        heading.addWidget(subtitle)
+        header.addLayout(heading)
+        header.addStretch()
+        self.theme_selector = QComboBox()
+        self.theme_selector.addItems(THEMES.keys())
+        self.theme_selector.setCurrentText(self.theme_name)
+        self.theme_selector.currentTextChanged.connect(self.change_theme)
+        header.addWidget(self.theme_selector)
+        about = QPushButton("Sobre")
+        about.clicked.connect(self.show_about)
+        header.addWidget(about)
+        page.addLayout(header)
 
-        left = ctk.CTkFrame(root, fg_color="transparent")
-        left.grid(row=1, column=0, sticky="nsew", padx=(page_padding, 8), pady=(0, 22))
-        right = ctk.CTkFrame(root, fg_color="transparent")
-        right.grid(row=1, column=1, sticky="nsew", padx=(8, page_padding), pady=(0, 22))
+        columns = QHBoxLayout()
+        columns.setSpacing(16)
+        left = QVBoxLayout()
+        right = QVBoxLayout()
+        columns.addLayout(left, 3)
+        columns.addLayout(right, 2)
+        page.addLayout(columns)
 
-        def card(parent):
-            """Cria a superficie padrao usada pelos blocos da interface."""
-            return ctk.CTkFrame(
-                parent,
-                fg_color=CARD,
-                corner_radius=22,
-                border_width=1,
-                border_color=self.theme["border"],
-            )
+        entry_card, entry_layout = self._card("ENTRADA", "Cole um vídeo ou playlist")
+        row = QHBoxLayout()
+        self.url_entry = Entry(self.url_var)
+        self.url_entry.setPlaceholderText("youtube.com/watch?v=...")
+        self.url_entry.returnPressed.connect(self.fetch_info)
+        self.fetch_btn = Button("Buscar")
+        self.fetch_btn.setObjectName("primary")
+        self.fetch_btn.clicked.connect(self.fetch_info)
+        row.addWidget(self.url_entry, 1)
+        row.addWidget(self.fetch_btn)
+        entry_layout.addLayout(row)
+        left.addWidget(entry_card)
 
-        # Entrada principal: link e busca ficam em uma unica linha.
-        url_card = card(left)
-        url_card.pack(fill="x", pady=(0, 14))
-        ctk.CTkLabel(
-            url_card,
-            text="LINK DO YOUTUBE",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=MUTED,
-        ).pack(anchor="w", padx=20, pady=(18, 8))
-        url_row = ctk.CTkFrame(url_card, fg_color="transparent")
-        url_row.pack(fill="x", padx=20, pady=(0, 20))
-        self.url_entry = ctk.CTkEntry(
-            url_row,
-            textvariable=self.url_var,
-            placeholder_text="Cole um video ou playlist aqui",
-            height=48,
-            corner_radius=15,
-            border_width=1,
-            border_color=self.theme["border"],
-            fg_color=field,
-            text_color=TEXT,
-            font=ctk.CTkFont(size=13),
-        )
-        self.url_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self.url_entry.bind("<Return>", lambda _e: self.fetch_info())
-        self.fetch_btn = ctk.CTkButton(
-            url_row,
-            text="Buscar",
-            width=104,
-            height=48,
-            corner_radius=15,
-            fg_color=ACCENT,
-            hover_color=ACCENT_HOVER,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self.fetch_info,
-        )
-        self.fetch_btn.pack(side="left")
+        info_card, info_layout = self._card("SELECIONADO")
+        self.title_label = Label("Nenhum vídeo carregado")
+        self.title_label.setObjectName("cardTitle")
+        self.title_label.setWordWrap(True)
+        self.meta_label = Label("Canal  ·  duração  ·  visualizações")
+        self.meta_label.setObjectName("muted")
+        info_layout.addWidget(self.title_label)
+        info_layout.addWidget(self.meta_label)
+        left.addWidget(info_card)
 
-        # Resumo do item encontrado.
-        self.info_card = card(left)
-        self.info_card.pack(fill="x", pady=(0, 14))
-        ctk.CTkLabel(
-            self.info_card,
-            text="CONTEUDO SELECIONADO",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=MUTED,
-        ).pack(anchor="w", padx=20, pady=(18, 8))
-        self.title_label = ctk.CTkLabel(
-            self.info_card,
-            text="Nenhum video carregado",
-            font=ctk.CTkFont(size=17, weight="bold"),
-            text_color=TEXT,
-            wraplength=520,
-            justify="left",
-            anchor="w",
-        )
-        self.title_label.pack(fill="x", padx=20)
-        self.meta_label = ctk.CTkLabel(
-            self.info_card,
-            text="Canal  ·  duracao  ·  visualizacoes",
-            font=ctk.CTkFont(size=12),
-            text_color=MUTED,
-            anchor="w",
-        )
-        self.meta_label.pack(fill="x", padx=20, pady=(5, 20))
+        options, options_layout = self._card("EXPORTAR")
+        mode_row = QHBoxLayout()
+        self.mode_seg = Combo(Value("Audio MP3" if self.mode.get() == "audio" else "Video"), ["Video", "Audio MP3"])
+        self.mode_seg.currentTextChanged.connect(self._on_mode)
+        self.quality_menu = Combo(self.quality, ["Melhor", "1080p", "720p", "480p", "360p"])
+        mode_row.addWidget(self.mode_seg)
+        mode_row.addWidget(self.quality_menu)
+        options_layout.addLayout(mode_row)
+        dest_row = QHBoxLayout()
+        self.dest_entry = Entry(self.output_dir)
+        choose = QPushButton("Pasta")
+        choose.clicked.connect(self.pick_folder)
+        dest_row.addWidget(self.dest_entry, 1)
+        dest_row.addWidget(choose)
+        options_layout.addLayout(dest_row)
+        self.download_btn = Button("Baixar agora")
+        self.download_btn.setObjectName("primary")
+        self.download_btn.clicked.connect(self.start_download)
+        options_layout.addWidget(self.download_btn)
+        left.addWidget(options)
 
-        # Opcoes de exportacao agrupadas sem divisorias pesadas.
-        options = card(left)
-        self.options_card = options
-        options.pack(fill="x")
-        ctk.CTkLabel(
-            options,
-            text="FORMATO E DESTINO",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=MUTED,
-        ).pack(anchor="w", padx=20, pady=(18, 10))
-        mode_row = ctk.CTkFrame(options, fg_color="transparent")
-        mode_row.pack(fill="x", padx=20)
-        self.mode_seg = ctk.CTkSegmentedButton(
-            mode_row,
-            values=["Video", "Audio MP3"],
-            command=self._on_mode,
-            height=40,
-            corner_radius=13,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            selected_color=ACCENT,
-            selected_hover_color=ACCENT_HOVER,
-            unselected_color=field,
-            unselected_hover_color=soft,
-        )
-        self.mode_seg.set("Audio MP3" if self.mode.get() == "audio" else "Video")
-        self.mode_seg.pack(side="left")
-        self.quality_menu = ctk.CTkOptionMenu(
-            mode_row,
-            variable=self.quality,
-            values=["Melhor", "1080p", "720p", "480p", "360p"],
-            width=124,
-            height=40,
-            corner_radius=13,
-            fg_color=field,
-            button_color=soft,
-            button_hover_color=self.theme["border"],
-            dropdown_fg_color=CARD,
-            font=ctk.CTkFont(size=12),
-        )
-        self.quality_menu.pack(side="right")
-        dest_row = ctk.CTkFrame(options, fg_color="transparent")
-        dest_row.pack(fill="x", padx=20, pady=(14, 12))
-        self.dest_entry = ctk.CTkEntry(
-            dest_row,
-            textvariable=self.output_dir,
-            height=42,
-            corner_radius=13,
-            border_width=0,
-            fg_color=field,
-            text_color=TEXT,
-        )
-        self.dest_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        ctk.CTkButton(
-            dest_row,
-            text="Pasta",
-            width=88,
-            height=42,
-            corner_radius=13,
-            fg_color=soft,
-            hover_color=self.theme["border"],
-            command=self.pick_folder,
-        ).pack(side="left")
-        self.download_btn = ctk.CTkButton(
-            options,
-            text="Baixar agora",
-            height=48,
-            corner_radius=15,
-            fg_color=ACCENT,
-            hover_color=ACCENT_HOVER,
-            font=ctk.CTkFont(size=14, weight="bold"),
-            command=self.start_download,
-        )
-        self.download_btn.pack(fill="x", padx=20, pady=(0, 20))
+        player_card, player_layout = self._card("AGORA")
+        badge_row = QHBoxLayout()
+        badge_row.addStretch()
+        self.player_badge = Label("PARADO")
+        self.player_badge.setObjectName("eyebrow")
+        badge_row.addWidget(self.player_badge)
+        player_layout.addLayout(badge_row)
+        self.thumbnail_label = Label("Cole um link e toque")
+        self.thumbnail_label.setObjectName("artwork")
+        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumbnail_label.setMinimumHeight(190)
+        self.thumbnail_label.setScaledContents(False)
+        player_layout.addWidget(self.thumbnail_label)
+        self.now_playing_label = Label("Nada tocando ainda")
+        self.now_playing_label.setObjectName("cardTitle")
+        self.now_playing_label.setWordWrap(True)
+        self.now_playing_meta = Label("YouTube  ·  fila vazia")
+        self.now_playing_meta.setObjectName("muted")
+        player_layout.addWidget(self.now_playing_label)
+        player_layout.addWidget(self.now_playing_meta)
+        self.timeline = Slider(0, 1000)
+        self.timeline.sliderPressed.connect(self._begin_seek)
+        self.timeline.sliderMoved.connect(self._preview_seek)
+        self.timeline.sliderReleased.connect(self._finish_seek)
+        player_layout.addWidget(self.timeline)
+        times = QHBoxLayout()
+        self.elapsed_label = Label("0:00")
+        self.duration_label = Label("0:00")
+        times.addWidget(self.elapsed_label)
+        times.addStretch()
+        times.addWidget(self.duration_label)
+        player_layout.addLayout(times)
+        controls = QHBoxLayout()
+        self.shuffle_btn = Button("MIX")
+        self.shuffle_btn.clicked.connect(self.toggle_shuffle)
+        prev = Button("ANT.")
+        prev.clicked.connect(self.previous_track)
+        self.play_pause_btn = Button("PLAY")
+        self.play_pause_btn.setObjectName("primary")
+        self.play_pause_btn.clicked.connect(self.toggle_play_pause)
+        nxt = Button("PRÓX.")
+        nxt.clicked.connect(self.next_track)
+        stop = Button("STOP")
+        stop.clicked.connect(self.stop_player)
+        for widget in (self.shuffle_btn, prev, self.play_pause_btn, nxt, stop):
+            controls.addWidget(widget)
+        player_layout.addLayout(controls)
+        volume = QHBoxLayout()
+        volume.addWidget(Label("VOL"))
+        self.volume_slider = Slider(0, 100)
+        self.volume_slider.set(self.player_volume)
+        self.volume_slider.valueChanged.connect(self.set_player_volume)
+        self.volume_label = Label(f"{self.player_volume}%")
+        volume.addWidget(self.volume_slider, 1)
+        volume.addWidget(self.volume_label)
+        player_layout.addLayout(volume)
+        self.play_btn = Button("Tocar este link")
+        self.play_btn.setObjectName("light")
+        self.play_btn.clicked.connect(self.start_player)
+        player_layout.addWidget(self.play_btn)
+        extras = QHBoxLayout()
+        self.radio_btn = Button("Rádio")
+        self.radio_btn.clicked.connect(self.toggle_radio)
+        self.like_btn = Button("Curtir")
+        self.like_btn.clicked.connect(lambda: self.rate_current_track(True))
+        self.dislike_btn = Button("Pular")
+        self.dislike_btn.clicked.connect(lambda: self.rate_current_track(False))
+        self.offline_btn = Button("Biblioteca")
+        self.offline_btn.clicked.connect(self.open_offline_playlist)
+        self.queue_btn = Button("Fila")
+        self.queue_btn.clicked.connect(self.toggle_playlist)
+        for widget in (self.radio_btn, self.like_btn, self.dislike_btn, self.offline_btn, self.queue_btn):
+            extras.addWidget(widget)
+        player_layout.addLayout(extras)
+        self.playlist_panel = QScrollArea()
+        self.playlist_panel.setWidgetResizable(True)
+        playlist_content = QWidget()
+        self.playlist_layout = QVBoxLayout(playlist_content)
+        self.playlist_panel.setWidget(playlist_content)
+        self.playlist_panel.setVisible(False)
+        self.playlist_panel.setMaximumHeight(230)
+        player_layout.addWidget(self.playlist_panel)
+        right.addWidget(player_card)
 
-        build_player_view(self, right, soft)
+        activity, activity_layout = self._card("ATIVIDADE")
+        self.status_label = Label(self.status_var.get())
+        self.status_label.setWordWrap(True)
+        self.progress = Progress()
+        self.log_box = LogBox()
+        self.log_box.setReadOnly(True)
+        self.log_box.setPlainText("Deck pronto. Cole um vídeo ou playlist para começar.\n")
+        self.log_box.setMinimumHeight(150)
+        activity_layout.addWidget(self.status_label)
+        activity_layout.addWidget(self.progress)
+        activity_layout.addWidget(self.log_box)
+        right.addWidget(activity, 1)
+        shell.addWidget(scroll, 1)
 
-        # Status e log ocupam um unico card secundario.
-        activity = card(right)
-        activity.pack(fill="both", expand=True)
-        ctk.CTkLabel(
-            activity,
-            text="ATIVIDADE",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=MUTED,
-        ).pack(anchor="w", padx=20, pady=(18, 8))
-        self.status_label = ctk.CTkLabel(
-            activity,
-            textvariable=self.status_var,
-            font=ctk.CTkFont(size=12),
-            text_color=MUTED,
-            anchor="w",
-            justify="left",
-            wraplength=340,
-        )
-        self.status_label.pack(fill="x", padx=20)
-        self.progress = ctk.CTkProgressBar(
-            activity,
-            height=7,
-            corner_radius=8,
-            progress_color=ACCENT,
-            fg_color=field,
-        )
-        self.progress.pack(fill="x", padx=20, pady=(12, 14))
-        self.progress.set(0)
-        self.log_box = ctk.CTkTextbox(
-            activity,
-            height=150,
-            fg_color=surface,
-            border_width=0,
-            text_color=MUTED,
-            font=ctk.CTkFont(family="Consolas", size=11),
-            corner_radius=14,
-            activate_scrollbars=True,
-        )
-        self.log_box.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-        self.log_box.insert("end", "Pronto. Cole um video ou playlist para comecar.\n")
-        self.log_box.configure(state="disabled")
+    def _card(self, eyebrow, title=None):
+        card = QFrame()
+        card.setObjectName("card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(22, 18, 22, 20)
+        layout.setSpacing(12)
+        label = QLabel(eyebrow)
+        label.setObjectName("eyebrow")
+        layout.addWidget(label)
+        if title:
+            heading = QLabel(title)
+            heading.setObjectName("cardTitle")
+            layout.addWidget(heading)
+        return card, layout
 
-    def change_theme(self, name: str):
-        """Reconstroi apenas os widgets e preserva fila, player e downloads."""
-        if name == self.theme_name:
+    def _apply_theme(self):
+        t = self.theme
+        self.setStyleSheet(f"""
+            QMainWindow, QWidget {{ background: {t['bg']}; color: {t['text']}; font-family: 'Segoe UI Variable', 'Segoe UI'; font-size: 13px; }}
+            QFrame#sidebar {{ background: {t['surface']}; border-right: 1px solid {t['border']}; }}
+            QFrame#card {{ background: {t['card']}; border: 1px solid {t['border']}; border-radius: 18px; }}
+            QLabel#eyebrow {{ color: {t['accent']}; font-size: 10px; font-weight: 700; letter-spacing: 1px; }}
+            QLabel#pageTitle {{ font-size: 25px; font-weight: 700; }}
+            QLabel#cardTitle {{ font-size: 17px; font-weight: 700; }}
+            QLabel#muted {{ color: {t['muted']}; }}
+            QLabel#artwork {{ background: {t['surface']}; color: {t['muted']}; border-radius: 14px; }}
+            QLabel#sideFooter {{ color: {t['muted']}; background: {t['field']}; border-radius: 12px; padding: 12px; }}
+            QPushButton, QComboBox, QLineEdit {{ background: {t['field']}; border: 1px solid {t['border']}; border-radius: 11px; padding: 10px 13px; min-height: 20px; }}
+            QPushButton:hover {{ background: {t['soft']}; }}
+            QPushButton#primary {{ background: {t['accent']}; color: {t['on_accent']}; border-color: {t['accent']}; font-weight: 700; }}
+            QPushButton#primary:hover {{ background: {t['accent_hover']}; }}
+            QPushButton#light {{ background: {t['text']}; color: {t['bg']}; font-weight: 700; }}
+            QPushButton#nav {{ text-align: left; border: 0; background: transparent; padding: 12px; }}
+            QPushButton#nav:checked {{ background: {t['accent']}; color: {t['on_accent']}; font-weight: 700; }}
+            QPushButton#queueItem {{ text-align: left; border: 0; background: transparent; }}
+            QPushButton#queueItem[active="true"] {{ background: {t['accent']}; color: {t['on_accent']}; }}
+            QPlainTextEdit, QScrollArea {{ background: {t['surface']}; border: 0; border-radius: 12px; }}
+            QProgressBar {{ background: {t['field']}; border: 0; border-radius: 4px; max-height: 8px; }}
+            QProgressBar::chunk {{ background: {t['accent']}; border-radius: 4px; }}
+            QSlider::groove:horizontal {{ height: 5px; background: {t['field']}; border-radius: 2px; }}
+            QSlider::sub-page:horizontal {{ background: {t['accent']}; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ width: 15px; margin: -5px 0; background: {t['text']}; border-radius: 7px; }}
+        """)
+
+    def change_theme(self, name):
+        if name not in THEMES or name == self.theme_name:
             return
-        if self.busy:
-            messagebox.showwarning(
-                "Operacao em andamento",
-                "Aguarde a busca ou o download terminar para trocar o tema.",
-            )
-            self.theme_selector.set(self.theme_name)
-            return
-        try:
-            self.settings.update({"theme": name})
-        except (OSError, ValueError) as exc:
-            messagebox.showerror("Tema", f"Nao foi possivel salvar o tema:\n{exc}")
-            self.theme_selector.set(self.theme_name)
-            return
-
         self.theme_name = name
         self.theme = THEMES[name]
-        self._rebuild_interface()
+        self.settings.update({"theme": name})
+        self._apply_theme()
 
-    def _rebuild_interface(self):
-        """Recria widgets apos mudancas visuais sem interromper o VLC."""
-        self.configure(fg_color=self.theme["bg"])
-        current_shell = getattr(self, "shell", None)
-        if current_shell is not None and current_shell.winfo_exists():
-            current_shell.destroy()
-        self.playlist_visible = False
-        self._build()
-
-        # Restaura o estado visual associado a uma reproducao em andamento.
-        if self.playlist:
-            self._populate_playlist()
-            if 0 <= self.playlist_index < len(self.playlist):
-                item = self.playlist[self.playlist_index]
-                self.now_playing_label.configure(
-                    text=f"{self.playlist_index + 1}/{len(self.playlist)}  ·  {item['title']}"
-                )
-                if self.thumbnail_image is not None and not item.get("offline"):
-                    self.thumbnail_label.configure(image=self.thumbnail_image, text="")
-        if self.radio_enabled:
-            self.radio_btn.configure(text="Radio ligada", fg_color=self.theme["accent"])
-        if self.shuffle_enabled:
-            self.shuffle_btn.configure(fg_color=self.theme["accent"])
-
-    def apply_settings(self, values: dict):
-        """Persiste preferencias e aplica imediatamente o que for seguro."""
-        old_theme = self.theme_name
-        old_compact = self.settings.get("compact_mode")
+    def apply_settings(self, values):
         self.settings.update(values)
-
-        self.output_dir.set(self.settings.get("download_folder"))
-        self.mode.set(self.settings.get("default_mode"))
-        self.quality.set(self.settings.get("default_quality"))
         self.player_volume = self.settings.get("default_volume")
-        self.shuffle_enabled = bool(self.settings.get("shuffle_on_start"))
-        if self.player is not None:
-            self.player.audio_set_volume(self.player_volume)
+        self.set_player_volume(self.player_volume)
+        selected = self.settings.get("theme")
+        if selected in THEMES and selected != self.theme_name:
+            self.theme_selector.setCurrentText(selected)
 
-        new_theme = self.settings.get("theme")
-        visual_changed = new_theme != old_theme or self.settings.get("compact_mode") != old_compact
-        if new_theme in THEMES:
-            self.theme_name = new_theme
-            self.theme = THEMES[new_theme]
-        if visual_changed and not self.busy:
-            self._rebuild_interface()
-        elif not visual_changed:
-            self.volume_slider.set(self.player_volume)
-            self.volume_label.configure(text=f"{self.player_volume}%")
-            selected_mode = "Audio MP3" if self.mode.get() == "audio" else "Video"
-            self.mode_seg.set(selected_mode)
-            self.quality_menu.configure(
-                state="disabled" if self.mode.get() == "audio" else "normal"
-            )
-            self.shuffle_btn.configure(
-                fg_color=(
-                    self.theme["accent"] if self.shuffle_enabled else self.theme["soft"]
-                )
-            )
-
-    def navigate_to(self, section: str):
-        """Executa os atalhos laterais e atualiza seu destaque visual."""
+    def navigate_to(self, section):
         for name, button in self.nav_buttons.items():
-            active = name == section
-            button.configure(
-                fg_color=self.theme["soft"] if active else "transparent",
-                text_color=self.theme["text"] if active else self.theme["muted"],
-            )
-
-        canvas = self.content_scroll._parent_canvas
+            button.setChecked(name == section)
         if section == "inicio":
-            canvas.yview_moveto(0)
+            self.content_scroll.verticalScrollBar().setValue(0)
         elif section == "downloads":
-            canvas.yview_moveto(0.35)
+            self.content_scroll.verticalScrollBar().setValue(350)
             self.dest_entry.focus_set()
-            self.set_status("Escolha o formato, a pasta e inicie o download.")
         elif section == "biblioteca":
             self.open_offline_playlist()
-        elif section == "configuracoes":
-            show_settings_dialog(self)
-
-
-    def _on_mode(self, value: str):
-        """Ativa ou desativa a qualidade ao mudar entre vídeo e áudio."""
-        if value == "Audio MP3":
-            self.mode.set("audio")
-            self.quality_menu.configure(state="disabled")
         else:
-            self.mode.set("video")
-            self.quality_menu.configure(state="normal")
+            self.show_settings()
+
+    def show_about(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Sobre o TubeGrab")
+        dialog.setFixedSize(560, 460)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(28, 26, 28, 26)
+        layout.setSpacing(14)
+
+        badge = QLabel("TG")
+        badge.setObjectName("aboutBadge")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setFixedSize(58, 58)
+        layout.addWidget(badge, alignment=Qt.AlignmentFlag.AlignHCenter)
+        title = QLabel("Feito com cuidado por Bruno Kemel")
+        title.setObjectName("pageTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+        description = QLabel(ABOUT_TEXT)
+        description.setObjectName("muted")
+        description.setWordWrap(True)
+        description.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(description, 1)
+
+        contact = QLabel('Contato: <a href="mailto:br.kemel@gmail.com">br.kemel@gmail.com</a>')
+        contact.setOpenExternalLinks(True)
+        contact.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        layout.addWidget(contact)
+
+        actions = QHBoxLayout()
+        email = QPushButton("Enviar sugestão")
+        email.setObjectName("primary")
+        email.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl("mailto:br.kemel@gmail.com"))
+        )
+        site = QPushButton("Conhecer meu trabalho")
+        site.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl("https://devkemel.com.br"))
+        )
+        actions.addWidget(email)
+        actions.addWidget(site)
+        layout.addLayout(actions)
+        dialog.setStyleSheet(
+            self.styleSheet()
+            + f"QLabel#aboutBadge {{ background: {self.theme['accent']}; "
+              f"color: {self.theme['on_accent']}; border-radius: 18px; "
+              "font-size: 16px; font-weight: 700; }}"
+        )
+        dialog.exec()
+
+    def show_settings(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Ajustes")
+        dialog.resize(620, 520)
+        layout = QVBoxLayout(dialog)
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+        controls = {}
+
+        def page(name):
+            widget = QWidget()
+            form = QFormLayout(widget)
+            form.setContentsMargins(20, 20, 20, 20)
+            form.setSpacing(14)
+            tabs.addTab(widget, name)
+            return form
+
+        def check(form, key, label):
+            widget = QCheckBox()
+            widget.setChecked(bool(self.settings.get(key)))
+            controls[key] = widget
+            form.addRow(label, widget)
+
+        def spin(form, key, label, minimum, maximum):
+            widget = QSpinBox()
+            widget.setRange(minimum, maximum)
+            widget.setValue(int(self.settings.get(key)))
+            controls[key] = widget
+            form.addRow(label, widget)
+
+        appearance = page("Aparência")
+        theme = QComboBox()
+        theme.addItems(THEMES.keys())
+        theme.setCurrentText(self.theme_name)
+        controls["theme"] = theme
+        appearance.addRow("Tema", theme)
+        check(appearance, "animations", "Animações")
+        check(appearance, "compact_mode", "Modo compacto")
+
+        playback = page("Reprodução")
+        spin(playback, "default_volume", "Volume padrão", 0, 100)
+        check(playback, "autoplay", "Avançar automaticamente")
+        check(playback, "shuffle_on_start", "Aleatório ao iniciar")
+        check(playback, "remember_playback", "Lembrar reprodução")
+
+        downloads = page("Downloads")
+        folder = QLineEdit(self.settings.get("download_folder"))
+        controls["download_folder"] = folder
+        downloads.addRow("Pasta", folder)
+        mode = QComboBox()
+        mode.addItems(["video", "audio"])
+        mode.setCurrentText(self.settings.get("default_mode"))
+        controls["default_mode"] = mode
+        downloads.addRow("Formato padrão", mode)
+        quality = QComboBox()
+        quality.addItems(["Melhor", "1080p", "720p", "480p", "360p"])
+        quality.setCurrentText(self.settings.get("default_quality"))
+        controls["default_quality"] = quality
+        downloads.addRow("Qualidade", quality)
+        template = QLineEdit(self.settings.get("filename_template"))
+        controls["filename_template"] = template
+        downloads.addRow("Nome dos arquivos", template)
+        check(downloads, "open_folder_after_download", "Abrir pasta ao concluir")
+
+        library = page("Biblioteca")
+        root = QLineEdit(self.settings.get("library_root"))
+        controls["library_root"] = root
+        library.addRow("Pasta raiz", root)
+        check(library, "scan_library_on_start", "Indexar ao iniciar")
+
+        radio = page("Rádio")
+        spin(radio, "radio_diversity", "Diversidade", 0, 100)
+        spin(radio, "radio_batch_size", "Faixas por lote", 2, 12)
+        check(radio, "allow_lives", "Permitir lives")
+        check(radio, "allow_covers", "Permitir covers")
+        check(radio, "allow_remixes", "Permitir remixes")
+
+        performance = page("Desempenho")
+        spin(performance, "buffer_size", "Pré-carregar faixas", 0, 5)
+        check(performance, "economy_mode", "Modo econômico")
+        clear_cache = QPushButton("Limpar cache de streams")
+        clear_cache.clicked.connect(self.stream_buffer.clear)
+        performance.addRow(clear_cache)
+
+        actions = QHBoxLayout()
+        actions.addStretch()
+        cancel = QPushButton("Cancelar")
+        cancel.clicked.connect(dialog.reject)
+        save = QPushButton("Salvar ajustes")
+        save.setObjectName("primary")
+
+        def persist():
+            values = {}
+            for key, widget in controls.items():
+                if isinstance(widget, QCheckBox):
+                    values[key] = widget.isChecked()
+                elif isinstance(widget, QSpinBox):
+                    values[key] = widget.value()
+                elif isinstance(widget, QComboBox):
+                    values[key] = widget.currentText()
+                else:
+                    values[key] = widget.text()
+            self.apply_settings(values)
+            self.output_dir.set(values["download_folder"])
+            self.dest_entry.setText(values["download_folder"])
+            self.mode.set(values["default_mode"])
+            self.quality.set(values["default_quality"])
+            dialog.accept()
+
+        save.clicked.connect(persist)
+        actions.addWidget(cancel)
+        actions.addWidget(save)
+        layout.addLayout(actions)
+        dialog.setStyleSheet(self.styleSheet())
+        dialog.exec()
+
+    def _on_mode(self, value):
+        self.mode.set("audio" if value == "Audio MP3" else "video")
+        self.quality_menu.configure(state="disabled" if value == "Audio MP3" else "normal")
 
     def pick_folder(self):
-        """Abre o seletor de pasta para definir a pasta de destino."""
-        path = ctk.filedialog.askdirectory(initialdir=self.output_dir.get() or downloads_dir())
+        path = QFileDialog.getExistingDirectory(self, "Pasta de destino", self.output_dir.get() or downloads_dir())
         if path:
             self.output_dir.set(path)
-            try:
-                self.settings.update({"download_folder": path})
-            except OSError:
-                pass
+            self.dest_entry.setText(path)
+            self.settings.update({"download_folder": path})
 
-    def log(self, message: str):
-        """Adiciona uma mensagem ao log da interface em modo thread-safe."""
-
-        def _write():
-            self.log_box.configure(state="normal")
+    def log(self, message):
+        def write():
             self.log_box.insert("end", message + "\n")
             self.log_box.see("end")
-            self.log_box.configure(state="disabled")
+        self.after(0, write)
 
-        self.after(0, _write)
-
-    def set_status(self, text: str, color: str = MUTED):
-        """Atualiza o texto principal de status na interface."""
-
-        def _set():
+    def set_status(self, text, color=MUTED):
+        def update():
             self.status_var.set(text)
-            self.status_label.configure(text_color=color)
+            self.status_label.configure(text=text, text_color=color)
+        self.after(0, update)
 
-        self.after(0, _set)
-
-    def set_busy(self, busy: bool):
-        """Desabilita os controles enquanto uma operação está em andamento."""
+    def set_busy(self, busy):
         self.busy = busy
-
-        def _ui():
+        def update():
             state = "disabled" if busy else "normal"
-            self.fetch_btn.configure(state=state)
-            self.download_btn.configure(state=state)
-            self.url_entry.configure(state=state)
-            self.mode_seg.configure(state=state)
-            if not busy and self.mode.get() == "video":
-                self.quality_menu.configure(state="normal")
-            else:
-                self.quality_menu.configure(state="disabled")
-
-        self.after(0, _ui)
+            for widget in (self.fetch_btn, self.download_btn, self.url_entry, self.mode_seg):
+                widget.configure(state=state)
+            self.quality_menu.configure(state="disabled" if busy or self.mode.get() == "audio" else "normal")
+        self.after(0, update)
 
     def _load_queue(self, url: str, load_generation: int):
         """Carrega a fila sem bloquear a janela e inicia a primeira faixa."""
@@ -757,7 +701,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             return
         if not self.settings.get("autoplay"):
             self.set_status("Faixa concluida. Reproducao automatica desativada.", OK)
-            self.play_pause_btn.configure(text="▶")
+            self._sync_player_chrome()
             return
         next_index = self._next_track_index()
         if next_index is not None:
@@ -768,7 +712,8 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             self.after(750, lambda: self._wait_for_radio_next(generation, 20))
         else:
             self.set_status("Fim da fila de reprodução.", OK)
-            self.now_playing_label.configure(text="Fila concluída")
+            self.now_playing_label.configure(text="Fila concluida")
+            self._sync_player_chrome()
 
     def _wait_for_radio_next(self, generation: int, attempts: int):
         """Aguarda uma busca ja ativa sem bloquear a interface ou o player."""
@@ -806,9 +751,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
                     self.elapsed_label.configure(text=self._format_player_time(current))
                 self.duration_label.configure(text=self._format_player_time(duration))
 
-            state = self.player.get_state()
-            symbol = "⏸" if state == vlc.State.Playing else "▶"
-            self.play_pause_btn.configure(text=symbol)
+            self._sync_player_chrome()
         self.after(500, self._refresh_player_progress)
 
     def _begin_seek(self, _event=None):
@@ -850,68 +793,66 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             self.log(f"Miniatura indisponivel: {exc}")
 
     def _set_thumbnail(self, image: Image.Image, generation: int):
-        """Converte a imagem para o formato do CustomTkinter na thread grafica."""
+        """Converte a miniatura para QPixmap na thread grafica."""
         if generation != self.playback_generation:
             return
-        self.thumbnail_image = ctk.CTkImage(light_image=image, dark_image=image, size=(280, 158))
+        rgba = image.convert("RGBA")
+        qimage = QImage(
+            rgba.tobytes("raw", "RGBA"),
+            rgba.width,
+            rgba.height,
+            QImage.Format.Format_RGBA8888,
+        )
+        self.thumbnail_image = QPixmap.fromImage(qimage.copy()).scaled(
+            560, 315, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
         self.thumbnail_label.configure(image=self.thumbnail_image, text="")
 
     def _show_current_track(self, index: int, item: dict):
         """Atualiza titulo, botoes e destaque da faixa atual."""
-        self.now_playing_label.configure(
-            text=f"{index + 1}/{len(self.playlist)}  ·  {item['title']}"
-        )
-        self.play_pause_btn.configure(text="⏸")
+        self.now_playing_label.configure(text=item["title"])
+        self._sync_player_chrome()
         self.timeline.set(0)
         self.elapsed_label.configure(text="0:00")
         duration_ms = int((item.get("duration") or 0) * 1000)
         self.duration_label.configure(text=self._format_player_time(duration_ms))
         if item.get("offline"):
-            self.thumbnail_label.configure(image=None, text="Reprodução offline")
+            self.thumbnail_label.configure(image=None, text="Reproducao offline")
         self._highlight_playlist_item()
         self._ensure_radio_queue()
 
     def _populate_playlist(self):
-        """Cria botoes leves para permitir acesso direto a qualquer faixa."""
-        for child in self.playlist_panel.winfo_children():
-            child.destroy()
+        """Recria a fila com botoes Qt leves."""
+        while self.playlist_layout.count():
+            item = self.playlist_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
         self.playlist_buttons = []
         for index, item in enumerate(self.playlist):
             duration = format_duration(item.get("duration"))
-            button = ctk.CTkButton(
-                self.playlist_panel,
-                text=f"{index + 1:02d}  {item['title']}  ·  {duration}",
-                height=38,
-                corner_radius=10,
-                anchor="w",
-                fg_color="transparent",
-                hover_color=self.theme["soft"],
-                text_color=MUTED,
-                command=lambda selected=index: self.select_playlist_track(selected),
-            )
-            button.pack(fill="x", pady=2)
+            button = Button(f"{index + 1:02d}  {item['title']}  ·  {duration}")
+            button.setObjectName("queueItem")
+            button.setProperty("active", index == self.playlist_index)
+            button.clicked.connect(lambda _checked=False, selected=index: self.select_playlist_track(selected))
+            self.playlist_layout.addWidget(button)
             self.playlist_buttons.append(button)
-        self.queue_btn.configure(text=f"Mostrar fila  ·  {len(self.playlist)}")
+        self.playlist_layout.addStretch()
+        self.queue_btn.configure(text=f"Fila  ·  {len(self.playlist)}")
         self._highlight_playlist_item()
 
     def _highlight_playlist_item(self):
-        """Destaca visualmente a musica que esta tocando."""
+        """Destaca a faixa ativa usando propriedade QSS."""
         for index, button in enumerate(getattr(self, "playlist_buttons", [])):
-            active = index == self.playlist_index
-            button.configure(
-                fg_color=self.theme["soft"] if active else "transparent",
-                text_color=self.theme["text"] if active else self.theme["muted"],
-            )
+            button.setProperty("active", index == self.playlist_index)
+            button.style().unpolish(button)
+            button.style().polish(button)
 
     def toggle_playlist(self):
-        """Abre ou recolhe a fila sem recriar seus itens."""
         self.playlist_visible = not self.playlist_visible
-        if self.playlist_visible:
-            self.playlist_panel.pack(fill="x", padx=22, pady=(0, 20))
-            self.queue_btn.configure(text=f"Ocultar fila  ·  {len(self.playlist)}")
-        else:
-            self.playlist_panel.pack_forget()
-            self.queue_btn.configure(text=f"Mostrar fila  ·  {len(self.playlist)}")
+        self.playlist_panel.setVisible(self.playlist_visible)
+        label = "Ocultar" if self.playlist_visible else "Fila"
+        self.queue_btn.configure(text=f"{label}  ·  {len(self.playlist)}")
 
     def select_playlist_track(self, index: int):
         """Inicia imediatamente a faixa escolhida pelo usuario."""
@@ -920,15 +861,14 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             self._start_current_track()
 
     def open_offline_playlist(self):
-        """Transforma os arquivos de uma pasta em uma fila local reproduzivel."""
-        folder = ctk.filedialog.askdirectory(
-            title="Escolha uma playlist ou biblioteca de pastas",
-            initialdir=self.output_dir.get() or downloads_dir(),
+        """Escolhe uma pasta e a transforma em fila local."""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Escolha uma playlist ou biblioteca",
+            self.output_dir.get() or downloads_dir(),
         )
-        if not folder:
-            return
-
-        self._load_offline_folder(folder, autoplay=True)
+        if folder:
+            self._load_offline_folder(folder, autoplay=True)
 
     def _load_offline_folder(self, folder: str, autoplay: bool):
         """Carrega uma biblioteca escolhida ou configurada para iniciar com o app."""
@@ -970,8 +910,8 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         if self.settings.get("scan_library_on_start") and folder and Path(folder).is_dir():
             self._load_offline_folder(folder, autoplay=False)
 
-    def _on_close(self):
-        """Salva o ponto atual e encerra o VLC antes de fechar a janela."""
+    def _save_session(self):
+        """Salva o ponto atual e encerra o VLC."""
         values = {}
         if self.settings.get("remember_playback"):
             current_url = self.url_var.get().strip()
@@ -991,14 +931,14 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             pass
         if self.player is not None:
             self.player.stop()
-        self.destroy()
+
 
     def toggle_shuffle(self):
         """Ativa ou desativa a escolha aleatoria da proxima faixa."""
         self.shuffle_enabled = not self.shuffle_enabled
         self.shuffle_btn.configure(
             fg_color=self.theme["accent"] if self.shuffle_enabled else self.theme["soft"],
-            text_color="#ffffff" if self.shuffle_enabled else self.theme["text"],
+            text_color=self.theme["on_accent"] if self.shuffle_enabled else self.theme["text"],
         )
         state = "ativada" if self.shuffle_enabled else "desativada"
         self.set_status(f"Reproducao aleatoria {state}.", OK if self.shuffle_enabled else MUTED)
@@ -1062,7 +1002,7 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
     def pause_player(self):
         if self.player is not None:
             self.player.set_pause(1)
-            self.play_pause_btn.configure(text="▶")
+            self._sync_player_chrome()
 
     def stop_player(self):
         # Invalidar a geração também encerra o monitor da thread anterior.
@@ -1071,15 +1011,15 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
             self.player.stop()
             self.player = None
         self.set_status("Reprodução parada.", MUTED)
-        self.now_playing_label.configure(text="Player parado")
-        self.play_pause_btn.configure(text="▶")
+        self.now_playing_label.configure(text="Nada tocando ainda")
         self.timeline.set(0)
         self.elapsed_label.configure(text="0:00")
+        self._sync_player_chrome()
 
     def resume_player(self):
         if self.player is not None:
             self.player.play()
-            self.play_pause_btn.configure(text="⏸")
+            self._sync_player_chrome()
 
     def next_track(self):
         """Vai para a próxima faixa da fila, quando existir."""
@@ -1093,6 +1033,49 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         if self.playlist_index > 0:
             self.playlist_index -= 1
             self._start_current_track()
+
+    def _sync_player_chrome(self):
+        """Atualiza badge, meta e botao central sem depender de icones unicode."""
+        playing = False
+        if self.player is not None:
+            try:
+                playing = self.player.get_state() == vlc.State.Playing
+            except Exception:
+                playing = False
+        chrome_state = (
+            playing,
+            self.player is not None,
+            self.playlist_index,
+            len(self.playlist),
+            self.radio_enabled,
+        )
+        if chrome_state == getattr(self, "_chrome_state", None):
+            return
+        self._chrome_state = chrome_state
+        if getattr(self, "play_pause_btn", None) is not None:
+            self.play_pause_btn.configure(text="PAUSE" if playing else "PLAY")
+        if getattr(self, "player_badge", None) is not None:
+            if playing:
+                badge = "AO VIVO" if self.radio_enabled else "TOCANDO"
+            elif self.player is not None:
+                badge = "PAUSA"
+            else:
+                badge = "PARADO"
+            self.player_badge.configure(
+                text=badge,
+                text_color=self.theme["accent"] if playing else self.theme["muted"],
+            )
+        if getattr(self, "now_playing_meta", None) is not None:
+            total = len(self.playlist)
+            if total and 0 <= self.playlist_index < total:
+                item = self.playlist[self.playlist_index]
+                source = "Offline" if item.get("offline") else "YouTube"
+                extra = "  ·  radio" if self.radio_enabled else ""
+                self.now_playing_meta.configure(
+                    text=f"{source}  ·  {self.playlist_index + 1}/{total}{extra}"
+                )
+            else:
+                self.now_playing_meta.configure(text="YouTube  ·  fila vazia")
 
     def start_player(self):
         """Valida inputs e inicia o player de áudio."""
@@ -1117,8 +1100,14 @@ class TubeGrab(DownloadController, RadioController, ctk.CTk):
         ).start()
 
 
+    def closeEvent(self, event):
+        self._save_session()
+        event.accept()
+
+
 def main():
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("dark-blue")
-    app = TubeGrab()
-    app.mainloop()
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName("TubeGrab")
+    window = TubeGrab()
+    window.show()
+    app.exec()

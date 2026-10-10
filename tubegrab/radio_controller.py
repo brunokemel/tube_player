@@ -1,7 +1,7 @@
 """Integracao entre o algoritmo de radio, a fila e os controles da interface."""
 
 import threading
-from tkinter import messagebox
+from .ui.dialogs import messagebox
 
 from .config import ACCENT, MUTED, OK, WARN
 from .downloader import search_music_candidates
@@ -23,9 +23,12 @@ class RadioController:
                 "Envie sugestões para: br.kemel@gmail.com",
             )
         self.radio_btn.configure(
-            text="Radio ligada" if self.radio_enabled else "Radio TubeGrab",
+            text="Radio on" if self.radio_enabled else "Radio",
             fg_color=self.theme["accent"] if self.radio_enabled else self.theme["soft"],
+            text_color=self.theme["on_accent"] if self.radio_enabled else self.theme["text"],
         )
+        if hasattr(self, "_sync_player_chrome"):
+            self._sync_player_chrome()
         state = "ligada" if self.radio_enabled else "desligada"
         self.set_status(f"Radio TubeGrab {state}.", OK if self.radio_enabled else MUTED)
         if self.radio_enabled:
@@ -44,7 +47,7 @@ class RadioController:
 
         if liked:
             self.set_status("Curtida salva. A radio vai aprender com essa escolha.", OK)
-            self.like_btn.configure(fg_color="#26704d")
+            self.like_btn.configure(fg_color=self.theme["like"])
             self.after(900, lambda: self.like_btn.configure(fg_color=self.theme["soft"]))
             self._ensure_radio_queue(force=True)
             return

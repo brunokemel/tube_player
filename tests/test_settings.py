@@ -31,7 +31,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.get("default_volume"), 100)
         self.assertEqual(settings.get("buffer_size"), 2)
         self.assertEqual(settings.get("radio_batch_size"), 2)
-        self.assertEqual(settings.get("theme"), "Azul moderno")
+        self.assertEqual(settings.get("theme"), "Carvao Ember")
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ A ideia e um app desktop simples, visual e direto:
 | Ferramenta | Papel |
 |---|---|
 | Python | Linguagem unica, facil de rodar em Windows, Linux e macOS |
-| CustomTkinter | Interface grafica moderna em cima do Tkinter, sem Electron |
+| PySide6 / Qt 6 | Interface desktop nativa, moderna e sem Electron |
 | yt-dlp | Extrai e baixa video/audio do YouTube (sucessor do youtube-dl) |
 | FFmpeg | Junta video+audio e converte o audio para MP3 |
 | VLC / python-vlc | Reproduz os streams de audio sem baixa-los antes |
@@ -43,7 +43,7 @@ dividida no pacote `tubegrab`:
 - `settings.py`: preferencias persistentes e valores padrao validados.
 - `offline.py`: descoberta e ordenacao de arquivos locais compativeis.
 - `models.py`: contrato compartilhado de uma faixa.
-- `ui/player_view.py`: construcao visual do card do player.
+- `ui/qt_widgets.py`: adaptadores leves entre os servicos e os widgets Qt.
 - `utils.py`: validacao de URL, pasta Downloads e formatacao de textos.
 - `config.py`: cores, titulo e tamanho inicial da janela.
 - `fetch_info()` usa `yt-dlp` apenas para ler metadados. Em playlists, a extracao e
@@ -58,7 +58,7 @@ dividida no pacote `tubegrab`:
 - No modo aleatorio, o player prioriza uma das faixas que ja estejam no buffer.
 - A miniatura tambem e carregada somente para a faixa atual e descartada na troca.
 - `_progress_hook()` atualiza barra, porcentagem, velocidade e ETA.
-- A GUI so e alterada com `self.after(...)`, porque Tkinter nao e thread-safe.
+- A GUI so e alterada pelo dispatcher Qt da thread principal.
 
 ### Decisoes de design
 
@@ -70,7 +70,7 @@ dividida no pacote `tubegrab`:
 - Botoes desabilitados enquanto busca ou baixa, para evitar clique duplo.
 
 A logica de YouTube esta separada da interface. Isso facilita reaproveitar as regras
-de fila em uma futura versao Android, embora a interface CustomTkinter e o VLC para
+de fila em uma futura versao Android, embora a interface PySide6 e o VLC para
 desktop precisem ser substituidos por componentes proprios do Android.
 
 ### Interface
@@ -89,13 +89,11 @@ desktop precisem ser substituidos por componentes proprios do Android.
 - Ao ativar a radio, o app informa que o algoritmo ainda esta em desenvolvimento e
   pode nao ter a mesma precisao de recomendacao de grandes plataformas.
 - Interface rolavel para manter os controles acessiveis em telas com pouca altura.
-- Nenhum pacote visual pesado ou arquivo de imagem adicional e carregado.
-- Seletor no cabecalho com os temas **Azul moderno** e **Vidro neon**.
+- Seletor no cabecalho com os temas **Carvao Ember**, **Studio Noite** e **Obsidiana**.
 - Logo oficial no cabecalho, na barra lateral e no icone da janela.
 - Icone proprio no executavel e nos atalhos criados na Area de Trabalho.
-- Tela de abertura com marca e progresso enquanto a interface e preparada.
 - A preferencia visual e salva e restaurada automaticamente na proxima execucao.
-- A troca de tema reconstroi somente os widgets, preservando player e fila atuais.
+- A troca de tema aplica QSS imediatamente, preservando player e fila atuais.
 
 ### Configuracoes
 
@@ -292,7 +290,7 @@ atalhos para enviar sugestoes ou visitar [devkemel.com.br](https://devkemel.com.
 
 | Problema | O que fazer |
 |---|---|
-| `No module named tkinter` | Windows: reinstale Python marcando tcl/tk. Linux: `sudo apt install python3-tk` |
+| `No module named PySide6` | Rode `pip install -r requirements.txt` |
 | `yt-dlp nao esta instalado` | `pip install -r requirements.txt` |
 | Erro de FFmpeg / nao gera MP3 | Instale o FFmpeg e confirme com `ffmpeg -version` |
 | Player nao inicia / erro de `libvlc` | Instale o VLC com a mesma arquitetura do Python |
@@ -317,8 +315,8 @@ TubeGrab/
     settings.py           Preferencias persistentes
     themes.py             Paletas e preferencia visual
     ui/
-      player_view.py      Interface visual do player
-      settings_dialog.py  Janela de configuracoes
+      qt_widgets.py       Adaptadores de widgets Qt
+      dialogs.py          Dialogos nativos Qt
     utils.py              Funcoes auxiliares
     config.py             Configuracao visual
   tests/
@@ -338,7 +336,7 @@ TubeGrab/
 
 ```text
 yt-dlp
-customtkinter
+PySide6
 pillow
 python-vlc
 ```

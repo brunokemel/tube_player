@@ -5,7 +5,7 @@ import os
 import shutil
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_submodules
 
 
 project_root = Path(SPECPATH)
@@ -18,7 +18,7 @@ if not (vlc_root / "libvlc.dll").is_file():
 if not ffmpeg_path:
     raise SystemExit("FFmpeg nao encontrado. Defina TUBEGRAB_FFMPEG_PATH antes do build.")
 
-datas = collect_data_files("customtkinter")
+datas = []
 # Mantem a marca disponivel tambem na distribuicao em pasta.
 datas.append((str(project_root / "tubegrab" / "logo" / "logo_app.png"), "tubegrab/logo"))
 vlc_tree = Tree(
